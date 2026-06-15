@@ -1,16 +1,11 @@
-# GGML
-file(GLOB GGML_SOURCES
-    ${CMAKE_SOURCE_DIR}/ggml/src/*.c
-    ${CMAKE_SOURCE_DIR}/ggml/src/*.cpp
-)
+llama_add_compile_flags()
 
-# llama-common-base
-file(GLOB LLAMA_COMMON_BASE_SOURCES
-    ${CMAKE_SOURCE_DIR}/common/*.cpp
-    ${CMAKE_SOURCE_DIR}/common/*.h
-)
+#
+# libraries
+#
 
-# llama models
+# llama
+
 file(GLOB LLAMA_MODELS_SOURCES "models/*.cpp")
 
 add_library(llama
@@ -46,23 +41,30 @@ add_library(llama
     unicode.h
     ${LLAMA_MODELS_SOURCES}
 
-    # GGML
-    ${GGML_SOURCES}
-
-    # llama-common-base
-    ${LLAMA_COMMON_BASE_SOURCES}
-
-    # VMM
+    # ⭐ Add VMM implementation
     ${CMAKE_SOURCE_DIR}/../ai_shell/vmm/vmm.c
 )
 
+set_target_properties(llama PROPERTIES
+    VERSION ${LLAMA_INSTALL_VERSION}
+    SOVERSION 0
+    MACHO_CURRENT_VERSION 0
+)
+
+# Include dirs
 target_include_directories(llama PRIVATE
     .
-    ${CMAKE_SOURCE_DIR}/ggml/include
-    ${CMAKE_SOURCE_DIR}/common
     ${CMAKE_SOURCE_DIR}/../ai_shell/vmm
 )
 
 target_include_directories(llama PUBLIC ../include)
+
 target_compile_features(llama PRIVATE cxx_std_17)
+
 target_link_libraries(llama PUBLIC ggml)
+
+if (BUILD_SHARED_LIBS)
+    set_target_properties(llama PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_compile_definitions(llama PRIVATE LLAMA_BUILD)
+    target_compile_definitions(llama PUBLIC LLAMA_SHARED)
+endif()
