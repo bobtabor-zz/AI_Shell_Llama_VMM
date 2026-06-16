@@ -187,9 +187,6 @@
             font-size: 0.9em;
             word-break: break-all;
         }
-
-
-
     </style>
 </head>
 <body>
@@ -208,11 +205,6 @@
             <button id="send">Send</button>
         </div>
     </div>
-    <div id="progress-bar" style="
-    width: 0%;
-    height: 4px;
-    background: #4caf50;
-    transition: width 0.05s linear;"></div>
 
     <script>
         let convId = null;
@@ -282,64 +274,38 @@
             return Array.from(images);
         }
 
-
         function addMessage(text, role) {
             const div = document.createElement("div");
             div.className = `msg ${role}`;
+
             let html = text;
 
-            // 1. Process images
-            const imgRegex = /(?<!=["'])(https?:\/\/[^<>"]+\.(?:jpg|jpeg|png|gif|webp))/gi;
+            // 1. Process images safely first (ignoring existing tags)
+            const imgRegex = /(?<!=["'])(https?:\/\/[^\s<>"]+\.(?:jpg|jpeg|png|gif|webp))/gi;
             html = html.replace(imgRegex, url => {
                 return `<img src="${url}" style="max-width:100%; max-height:150px; border-radius:12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin:8px 0; display:block;">`;
             });
 
-            // 2. Process links
-            const generalUrlRegex = /(?<!=["'])(https?:\/\/[^<>"]+)/gi;
+            // 2. FIXED: Fallback to match ANY valid web link or Wikipedia format (handles all casing variants)
+            const generalUrlRegex = /(?<!=["'])(https?:\/\/[^\s<>"]+)/gi;
             html = html.replace(generalUrlRegex, url => {
-                // FIXED: Removed the colon (:) so Wikipedia Talk: pages do not break
-                let cleanUrl = url.replace(/[.,\/#!$%\^&;{}=\-_`~()]+$/g, "");
-                return `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer" style="color:#4ea1ff; font-weight:500; text-decoration:underline; word-break:break-all;"> ${cleanUrl} </a>`;
+                // Trim any hanging text characters like punctuation at the very end of a sentence
+                let cleanUrl = url.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]+$/, "");
+                return `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer" style="color:#4ea1ff; font-weight:500; text-decoration:underline; word-break:break-all;">${cleanUrl}</a>`;
             });
 
-            // 3. FIXED: Chaining statements separated onto distinct lines to prevent comment breaking
-            html = html.replace(/\n\n+/g, '</p><p>'); // Double (or more) newlines → paragraph break
-            html = html.replace(/\n/g, '<br>');        // Single newline → line break
+            // 3. Convert literal server newlines into clean HTML breaks
+            html = html.replace(/\n/g, "<br>");
 
-            // Wrap the whole content in <p> tags so paragraphs work
-            html = `<p>${html}</p>`;
             div.innerHTML = html;
-
-            // === Force image loading (keep your existing fix) ===
-            const images = div.querySelectorAll("img");
-            images.forEach(img => {
-                const newImg = new Image();
-                newImg.src = img.src;
-                newImg.style.cssText = img.style.cssText;
-                newImg.onload = () => {
-                    img.src = newImg.src;
-                    img.style.opacity = "1";
-                };
-                setTimeout(() => {
-                    if (!img.complete) img.src = img.src;
-                }, 100);
-            });
 
             const chat = document.getElementById("chat");
             if (chat) {
                 chat.appendChild(div);
                 chat.scrollTop = chat.scrollHeight;
             }
-
-            // Extra fallback for images
-            setTimeout(() => {
-                div.querySelectorAll("img").forEach(img => {
-                    const oldSrc = img.src;
-                    img.src = '';
-                    img.src = oldSrc;
-                });
-            }, 50);
         }
+
 
 
 
@@ -415,42 +381,6 @@
             renderSidebar();
             loadConversation(convId);
         }
-
-        function startStream(prompt) {
-            addMessage(prompt, "user");
-
-            let assistantDiv = document.createElement("div");
-            assistantDiv.className = "message assistant";
-            assistantDiv.textContent = "";
-            document.getElementById("chat-container").appendChild(assistantDiv);
-
-            const es = new EventSource("/api/stream?prompt=" + encodeURIComponent(prompt));
-
-            es.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-
-                if (data.token) {
-                    assistantDiv.textContent += data.token;
-
-                    // Update progress bar based on token count
-                    const pct = Math.min(100, data.count * 2);
-                    document.getElementById("progress-bar").style.width = pct + "%";
-                }
-
-                if (data.done) {
-                    es.close();
-                    document.getElementById("progress-bar").style.width = "100%";
-                    setTimeout(() => {
-                        document.getElementById("progress-bar").style.width = "0%";
-                    }, 500);
-                }
-            };
-
-            es.onerror = () => {
-                es.close();
-            };
-        }
-
     </script>
 </body>
 </html>
