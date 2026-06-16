@@ -3,6 +3,11 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 VisualStudioVersion = 18.6.11806.211
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ai_shell", "ai_shell.vcxproj", "{A1B2C3D4-E5F6-47A8-9B10-112233445566}"
+	ProjectSection(ProjectDependencies) = postProject
+		{078E6070-0693-3175-A08C-4E82A6E97FCE} = {078E6070-0693-3175-A08C-4E82A6E97FCE}
+		{32F7D5FC-166D-3975-AA9F-D8C224C8708B} = {32F7D5FC-166D-3975-AA9F-D8C224C8708B}
+		{A78BA632-F030-33A4-8FA8-BE5E4750CE60} = {A78BA632-F030-33A4-8FA8-BE5E4750CE60}
+	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "llama", "..\llama.cpp\build\src\llama.vcxproj", "{078E6070-0693-3175-A08C-4E82A6E97FCE}"
 EndProject

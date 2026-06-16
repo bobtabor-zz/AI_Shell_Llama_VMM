@@ -43,8 +43,8 @@
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <Link>
-      <AdditionalLibraryDirectories>.\Dll;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>llama.lib;ggml.lib;ggml-base.lib;ggml-cpu.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\llama.cpp\build\common\Debug;..\llama.cpp\build\ggml\src\Debug;..\llama.cpp\build\src\Debug;.\Dll;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>llama.lib;ggml.lib;ggml-base.lib;ggml-cpu.lib;llama-common-base.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <PostBuildEvent>
         <Command>copy /Y "$(ProjectDir)Dll\*.dll" "$(OutDir)"</Command>
       </PostBuildEvent>
