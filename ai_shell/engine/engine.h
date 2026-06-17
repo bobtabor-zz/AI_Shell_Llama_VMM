@@ -9,6 +9,8 @@ extern "C" {
 #define MAX_TURNS 32
 #define MAX_PATH 260
 
+    extern bool was_chat_console;
+
     typedef struct {
         char role[8];   // "User" / "AI"
         char text[4096];
