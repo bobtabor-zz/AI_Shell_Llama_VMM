@@ -13,6 +13,7 @@
 // -----------------------------------------------------------------------------
 
 engine_t * g_engine = NULL;
+bool was_chat_console = false;
 
 // -----------------------------------------------------------------------------
 // Utility
@@ -185,28 +186,28 @@ static void dispatch(char* line) {
 
     }
 
-    //else if (strcmp(cmd, "CHAT") == 0) {
-    //    char reply[4096];
+    else if (strcmp(cmd, "CHAT") == 0) {
+        char reply[4096];
+        was_chat_console = true;        
+       char user_msg[4096] = { 0 };
+        for (int i = 1; i < argc; i++) {
+            strcat(user_msg, argv[i]);
+            if (i + 1 < argc) strcat(user_msg, " ");
+        }
 
-    //    char user_msg[4096] = { 0 };
-    //    for (int i = 1; i < argc; i++) {
-    //        strcat(user_msg, argv[i]);
-    //        if (i + 1 < argc) strcat(user_msg, " ");
-    //    }
+        if (!g_engine) {
+            printf("ERR no_model_loaded\n");
+            return;
+        }
 
-    //    if (!g_engine) {
-    //        printf("ERR no_model_loaded\n");
-    //        return;
-    //    }
-
-    //    if (engine_chat(g_engine, user_msg, reply, sizeof(reply)) == 0) {
-    //        //printf("AI> %s\n", reply);
-    //    }
-    //    else {
-    //        printf("ERR chat_failed\n");
-    //    }
-    //    printf("\n");
-    //}
+        if (engine_chat(g_engine, user_msg, reply, sizeof(reply)) == 0) {
+            //printf("AI> %s\n", reply);
+        }
+        else {
+            printf("ERR chat_failed\n");
+        }
+        printf("\n");
+    }
 
 
     else if (strcmp(cmd, "PING") == 0) {
