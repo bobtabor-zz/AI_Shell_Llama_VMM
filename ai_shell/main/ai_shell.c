@@ -171,29 +171,28 @@ static void dispatch(char* line) {
 
     const char* cmd = cmd_buf;
 
-  //  if (strcmp(cmd, "OPEN") == 0) {
-  //      cmd_open(argc, argv);
+   if (strcmp(cmd, "OPEN") == 0) {
+        cmd_open(argc, argv);
+    }
 
-  //  }
+  //if (strncmp(line, "OPEN", 4) == 0) {
+  //    char slot[64], path[4096];
 
-  if (strncmp(line, "OPEN", 4) == 0) {
-      char slot[64], path[4096];
+  //    if (sscanf(line, "OPEN %63s %4095s", slot, path) == 2) {
+  //        printf("[engine] Loading model: %s\n", path);
+  //        fflush(stdout);
 
-      if (sscanf(line, "OPEN %63s %4095s", slot, path) == 2) {
-          printf("[engine] Loading model: %s\n", path);
-          fflush(stdout);
+  //        g_engine = engine_open(path);
 
-          g_engine = engine_open(path);
-
-          printf("MODEL LOADED OK\n");
-          fflush(stdout);
-      }
-      else {
-          printf("ERROR: OPEN syntax is OPEN <slot> <path>\n");
-          fflush(stdout);
-      }
-      return;
-  }
+  //        printf("MODEL LOADED OK\n");
+   //       fflush(stdout);
+  //    }
+  //    else {
+  //        printf("ERROR: OPEN syntax is OPEN <slot> <path>\n");
+  //        fflush(stdout);
+ //     }
+ //     return;
+ // }
 
     else if (strcmp(cmd, "CLOSE") == 0) {
         cmd_close(argc, argv);
