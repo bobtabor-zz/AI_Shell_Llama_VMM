@@ -587,10 +587,20 @@ int engine_generate_reply(
     }
 
     llama_batch_free(batch);
-    return (int)out_len;
+    if(was_chat_console == true) // console flag
+    {
+    // print the generated text to console
+    printf("%s", out);
+    fflush(stdout);
+    was_chat_console - false;
+    return 0;
+    }
+    else
+    {
+        return (int)out_len;  //Web return
+    }    
+    //return (int)out_len;
 }
-
-
 
 // ------------------------------------------------------------
 // HTML chat entry point - Complete Separated Plugin & UI Merge Pipeline
