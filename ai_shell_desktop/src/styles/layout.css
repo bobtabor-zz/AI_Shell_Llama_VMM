@@ -1,0 +1,37 @@
+.sidebar {
+    width: 260px;
+    background: #2a2c31;
+    padding: 20px;
+}
+
+.chat-window {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+}
+
+.input-bar {
+    display: flex;
+    padding: 10px;
+    background: #2a2c31;
+}
+
+.bubble.user {
+    background: #3a4bff33;
+    padding: 12px;
+    margin: 8px 0;
+    border-radius: 8px;
+}
+
+.bubble.assistant {
+    background: #2f3136;
+    padding: 12px;
+    margin: 8px 0;
+    border-radius: 8px;
+}
