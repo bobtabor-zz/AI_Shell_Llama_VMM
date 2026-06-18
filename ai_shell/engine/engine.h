@@ -45,7 +45,8 @@ extern "C" {
         vmm_model_t* vmm_model;
 
         // ⭐ KV subsystem
-        
+        llama_token assistant_tok;
+
         bool    kv_valid;      // is there a meaningful sequence in KV?
         int64_t kv_len;        // how many tokens are currently in KV?
 

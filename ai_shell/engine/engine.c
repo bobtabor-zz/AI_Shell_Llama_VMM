@@ -13,7 +13,6 @@
 
 char* g_plugin_result = NULL;
 
-
 char* engine_json_extract_string(char* s, char* out, size_t out_sz)
 {
     size_t pos = 0;
@@ -65,25 +64,192 @@ void engine_init_runtime(engine_t* e) {
     e->n_turns = 0;
 }
 
-// ------------------------------------------------------------
-// Llama-3 chat template wrappers (manual, no <|begin_of_text|>)
-// ------------------------------------------------------------
 
-static void engine_wrap_llama3_system(char* dst, size_t dst_size, const char* system_text) {
-    snprintf(dst, dst_size,
-        "<|start_header_id|>system<|end_header_id|>\n\n" // Fixed: Added extra \n
+// ============================================================================
+// MODEL FAMILY ENUM + GLOBAL
+// ============================================================================
+typedef enum {
+    MODEL_LLAMA3,
+    MODEL_PHI3,
+    MODEL_SMOLLM,
+    MODEL_MISTRAL,
+    MODEL_QWEN,
+    MODEL_GEMMA,
+    MODEL_LLAMA2,
+    MODEL_UNKNOWN
+} model_family_t;
+
+model_family_t g_model_family = MODEL_UNKNOWN;
+
+
+// ============================================================================
+// MODEL FAMILY DETECTOR (llama.cpp metadata + filename fallback)
+// ============================================================================
+static model_family_t detect_model_family(const char* path, struct llama_model* model) {
+    const char* arch = NULL;
+
+    // ---- llama.cpp metadata detection ----
+   /* int meta_count = llama_model_meta_count(model);
+    for (int i = 0; i < meta_count; i++) {
+        const char* key = llama_model_meta_key(model, i);
+        if (key && strcmp(key, "general.architecture") == 0) {
+            static char buf[256];
+            llama_model_meta_val_str(model, i, buf, sizeof(buf));
+            arch = buf;
+            break;
+        }
+    }*/
+
+    // ---- Filename fallback ----
+    char lower[4096];
+    snprintf(lower, sizeof(lower), "%s", path);
+    for (char* p = lower; *p; ++p) *p = (char)tolower(*p);
+
+    if (arch) {
+        if (strcmp(arch, "llama3") == 0) return MODEL_LLAMA3;
+        if (strcmp(arch, "phi3") == 0) return MODEL_PHI3;
+        if (strcmp(arch, "smollm") == 0) return MODEL_SMOLLM;
+        if (strcmp(arch, "mistral") == 0) return MODEL_MISTRAL;
+        if (strcmp(arch, "qwen2") == 0 || strcmp(arch, "qwen") == 0) return MODEL_QWEN;
+        if (strcmp(arch, "gemma") == 0) return MODEL_GEMMA;
+        if (strcmp(arch, "llama") == 0) return MODEL_LLAMA2;
+    }
+
+    // ---- Filename fallback ----
+    char lower2[4096];
+    snprintf(lower2, sizeof(lower2), "%s", path);
+    for (char* p = lower2; *p; ++p) *p = (char)tolower(*p);
+
+    if (strstr(lower2, "llama-3") || strstr(lower2, "llama3")) return MODEL_LLAMA3;
+    if (strstr(lower2, "phi-3") || strstr(lower2, "phi3"))   return MODEL_PHI3;
+    if (strstr(lower2, "smollm"))                             return MODEL_SMOLLM;
+    if (strstr(lower2, "mistral"))                            return MODEL_MISTRAL;
+    if (strstr(lower2, "qwen"))                               return MODEL_QWEN;
+    if (strstr(lower2, "gemma"))                              return MODEL_GEMMA;
+    if (strstr(lower2, "llama-2") || strstr(lower2 , "llama2")) return MODEL_LLAMA2;
+
+    return MODEL_UNKNOWN;
+}
+
+
+// ============================================================================
+// WRAPPER FUNCTIONS (EXACTLY ONE COPY OF EACH)
+// ============================================================================
+
+// ---- Llama‑3 ----
+static void wrap_llama3_system(char* dst, size_t n, const char* sys) {
+    snprintf(dst, n,
+        "<|start_header_id|>system<|end_header_id|>\n\n"
         "%s<|eot_id|>\n",
-        system_text
+        sys
     );
 }
 
-static void engine_wrap_llama3_user(char* dst, size_t dst_size, const char* user_text) {
-    snprintf(dst, dst_size,
-        "<|start_header_id|>user<|end_header_id|>\n\n" // Fixed: Added extra \n
+static void wrap_llama3_user(char* dst, size_t n, const char* usr) {
+    snprintf(dst, n,
+        "<|start_header_id|>user<|end_header_id|>\n\n"
         "%s<|eot_id|>\n"
-        "<|start_header_id|>assistant<|end_header_id|>\n\n", // Fixed: Added extra \n
-        user_text
+        "<|start_header_id|>assistant<|end_header_id|>\n\n",
+        usr
     );
+}
+
+
+// ---- Phi‑3 ----
+static void wrap_phi3_system(char* dst, size_t n, const char* sys) {
+    snprintf(dst, n, "<|system|>\n%s\n", sys);
+}
+
+static void wrap_phi3_user(char* dst, size_t n, const char* usr) {
+    snprintf(dst, n, "<|user|>\n%s\n<|assistant|>\n", usr);
+}
+
+
+// ---- SmolLM ----
+static void wrap_smollm_system(char* dst, size_t n, const char* sys) {
+    snprintf(dst, n, "<s>[INST] <<SYS>>\n%s\n<</SYS>>\n", sys);
+}
+
+static void wrap_smollm_user(char* dst, size_t n, const char* usr) {
+    snprintf(dst, n, "%s [/INST]", usr);
+}
+
+
+// ---- Mistral ----
+static void wrap_mistral_system(char* dst, size_t n, const char* sys) {
+    snprintf(dst, n, "<s>[INST] <<SYS>>\n%s\n<</SYS>>\n", sys);
+}
+
+static void wrap_mistral_user(char* dst, size_t n, const char* usr) {
+    snprintf(dst, n, "%s [/INST]", usr);
+}
+
+
+// ---- Qwen ----
+static void wrap_qwen_system(char* dst, size_t n, const char* sys) {
+    snprintf(dst, n, "<|im_start|>system\n%s<|im_end|>\n", sys);
+}
+
+static void wrap_qwen_user(char* dst, size_t n, const char* usr) {
+    snprintf(dst, n,
+        "<|im_start|>user\n%s<|im_end|>\n"
+        "<|im_start|>assistant\n",
+        usr
+    );
+}
+
+
+// ---- Gemma ----
+static void wrap_gemma_system(char* dst, size_t n, const char* sys) {
+    snprintf(dst, n, "<bos><start_of_turn>system\n%s<end_of_turn>\n", sys);
+}
+
+static void wrap_gemma_user(char* dst, size_t n, const char* usr) {
+    snprintf(dst, n,
+        "<start_of_turn>user\n%s<end_of_turn>\n"
+        "<start_of_turn>assistant\n",
+        usr
+    );
+}
+
+
+// ---- Llama‑2 ----
+static void wrap_llama2_system(char* dst, size_t n, const char* sys) {
+    snprintf(dst, n, "[INST] <<SYS>>\n%s\n<</SYS>>\n", sys);
+}
+
+static void wrap_llama2_user(char* dst, size_t n, const char* usr) {
+    snprintf(dst, n, "%s [/INST]", usr);
+}
+
+
+// ============================================================================
+// UNIVERSAL DISPATCHER (CALL THESE FROM FEED_SYSTEM / FEED_USER)
+// ============================================================================
+void engine_wrap_system(char* dst, size_t n, const char* sys) {
+    switch (g_model_family) {
+    case MODEL_LLAMA3:  wrap_llama3_system(dst, n, sys); break;
+    case MODEL_PHI3:    wrap_phi3_system(dst, n, sys); break;
+    case MODEL_SMOLLM:  wrap_smollm_system(dst, n, sys); break;
+    case MODEL_MISTRAL: wrap_mistral_system(dst, n, sys); break;
+    case MODEL_QWEN:    wrap_qwen_system(dst, n, sys); break;
+    case MODEL_GEMMA:   wrap_gemma_system(dst, n, sys); break;
+    case MODEL_LLAMA2:  wrap_llama2_system(dst, n, sys); break;
+    default: snprintf(dst, n, "%s", sys); break;
+    }
+}
+
+void engine_wrap_user(char* dst, size_t n, const char* usr) {
+    switch (g_model_family) {
+    case MODEL_LLAMA3:  wrap_llama3_user(dst, n, usr); break;
+    case MODEL_PHI3:    wrap_phi3_user(dst, n, usr); break;
+    case MODEL_SMOLLM:  wrap_smollm_user(dst, n, usr); break;
+    case MODEL_MISTRAL: wrap_mistral_user(dst, n, usr); break;
+    case MODEL_QWEN:    wrap_qwen_user(dst, n, usr); break;
+    case MODEL_GEMMA:   wrap_gemma_user(dst, n, usr); break;
+    case MODEL_LLAMA2:  wrap_llama2_user(dst, n, usr); break;
+    default: snprintf(dst, n, "%s", usr); break;
+    }
 }
 
 
@@ -117,7 +283,7 @@ int engine_feed_system_prompt(engine_t* e, const char* system_text) {
     const struct llama_vocab* vocab = llama_model_get_vocab(e->model);
 
     char buf[4096];
-    engine_wrap_llama3_system(buf, sizeof(buf), system_text);
+    engine_wrap_system(buf, sizeof(buf), system_text);
 
     llama_token tokens[1024];
     int n_tokens = llama_tokenize(
@@ -193,7 +359,7 @@ int engine_feed_user(engine_t* e, const char* user_text_raw) {
     char* wrapped = (char*)malloc(wrapped_size);
     if (!wrapped) return -1;
 
-    engine_wrap_llama3_user(wrapped, wrapped_size, user_text_raw);
+    engine_wrap_user(wrapped, wrapped_size, user_text_raw);
 
     // 2. Perform a dry-run token count request
     int n_tokens = llama_tokenize(vocab, wrapped, (int32_t)strlen(wrapped), NULL, 0, false, true);
@@ -289,6 +455,21 @@ int engine_generate_reply(
 
     const struct llama_vocab* vocab = llama_model_get_vocab(e->model);
 
+    // Detect <|assistant|> token for Phi‑3        
+    llama_token tmp[8];
+    int n = llama_tokenize(
+        vocab,
+        "<|assistant|>",
+        strlen("<|assistant|>"),
+        tmp,
+        8,
+        true,
+        true
+    );
+
+    llama_token assistant_tok = (n > 0 ? tmp[0] : -1);
+
+
     out[0] = '\0';
     size_t out_len = 0;
     int n_gen = 0;
@@ -304,8 +485,26 @@ int engine_generate_reply(
         llama_token tok = engine_sample_next(e);
 
         // Stop conditions
-        if (tok == eos_tok || tok == eot_tok || llama_token_is_control(vocab, tok))
+        /*  if (tok == eos_tok || tok == eot_tok || llama_token_is_control(vocab, tok))
+            break;*/
+
+            // 1. Stop on EOS
+        if (tok == eos_tok)
             break;
+
+        // 2. Stop on control tokens (Llama‑3, Qwen, Gemma)
+        if (llama_token_is_control(vocab, tok))
+            break;
+
+        // 3. Phi‑3: stop after first newline once assistant has started
+        if (tok == '\n' && n_gen > 0)
+            break;
+
+        // 4. Stop if model emits another assistant tag (Phi‑3 hallucination guard)
+        if (tok == e->assistant_tok && n_gen > 0)
+            break;
+
+        // -----------------------------
 
         // 3. Token → text
         char piece[256];
@@ -579,6 +778,12 @@ engine_t* engine_open(const char* model_path) {
         free(e);
         return NULL;
     }
+
+    // ⭐ Detect model family here
+        g_model_family = detect_model_family(model_path, e->model);
+    printf("[engine] detected model family: %d\n", (int)g_model_family);
+
+   
 
     // 3. Create context
     struct llama_context_params cparams = llama_context_default_params();
