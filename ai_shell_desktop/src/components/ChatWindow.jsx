@@ -1,21 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
-
 import ChatInput from "./ChatInput";
 import MessageBubble from "./MessageBubble";
 
 export default function ChatWindow({ sessionId, messages, setMessages }) {
     async function sendMessage(text) {
-        const userMsg = { role: "user", content: text };
-        setMessages([...messages, userMsg]);
-
-        const response = await invoke("chat", {
-            sessionId,
-            prompt: text
-        });
-
-        const assistantMsg = { role: "assistant", content: response };
-        setMessages((prev) => [...prev, assistantMsg]);
+        if (!text.trim()) return;
+        setMessages((prev) => [...prev, { role: "user", content: text }]);
+        await invoke("chat", { prompt: text }); // Let engine-output catch the reply
     }
+
+
 
     return (
         <div className="chat-window">
@@ -24,7 +18,6 @@ export default function ChatWindow({ sessionId, messages, setMessages }) {
                     <MessageBubble key={i} role={m.role} content={m.content} />
                 ))}
             </div>
-
             <ChatInput onSend={sendMessage} />
         </div>
     );
