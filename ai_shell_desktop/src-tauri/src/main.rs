@@ -1,61 +1,81 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
 use std::process::{Command, Stdio};
 use std::io::{Write, BufRead, BufReader};
+use tauri::{Emitter, AppHandle}; // ⭐ Import Emitter to send events
 
 struct EngineProcess {
-    child: std::process::Child,
     stdin: std::process::ChildStdin,
-    stdout: BufReader<std::process::ChildStdout>,
 }
 
 static ENGINE: Lazy<Mutex<Option<EngineProcess>>> = Lazy::new(|| Mutex::new(None));
 
-fn start_engine() -> Result<(), String> {
-     println!("START_ENGINE CALLED");
-    let mut child = Command::new("C:\\Users\\btabor\\source\\ai_shell\\x64\\Debug\\ai_shell.exe")
+// ⭐ Accept app_handle to send events to the frontend
+fn start_engine(app_handle: AppHandle) -> Result<(), String> {
+    let mut engine_lock = ENGINE.lock().unwrap();
+    if engine_lock.is_some() {
+        return Ok(()); 
+    }
+
+    eprintln!("STARTING AI_SHELL.EXE PROCESS..."); 
+    
+    let exe_path = "C:\\Users\\Bobio\\source\\ai_shell\\x64\\Debug\\ai_shell.exe";
+    let exe_dir = "C:\\Users\\Bobio\\source\\ai_shell\\x64\\Debug";
+
+    let mut child = Command::new(exe_path)
+        .current_dir(exe_dir) 
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
-        //.map_err(|e| e.to_string())?;
-        .map_err(|e| {
-    println!("FAILED TO START ENGINE: {}", e);
-    e.to_string()})?;
+        .map_err(|e| format!("Process spawn failed: {}", e))?;
 
-    let stdin = child.stdin.take().ok_or("no stdin")?;
-    let stdout = BufReader::new(child.stdout.take().ok_or("no stdout")?);
+    let stdin = child.stdin.take().ok_or("Failed to map stdin")?;
+    let stdout = child.stdout.take().ok_or("Failed to map stdout")?;
+    let stderr = child.stderr.take().ok_or("Failed to map stderr")?;
 
-    *ENGINE.lock().unwrap() = Some(EngineProcess { child, stdin, stdout });
+    // 🧵 Thread 1: Read stdout and EMIT to frontend
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            if let Ok(msg) = line {
+                eprintln!("[AI_SHELL STDOUT] {}", msg);
+                // ⭐ Emit event named "engine-output" to React
+                let _ = app_handle.emit("engine-output", msg);
+            }
+        }
+    });
 
+    // 🧵 Thread 2: Read stderr continuously
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines() {
+            if let Ok(msg) = line {
+                eprintln!("[AI_SHELL STDERR] {}", msg);
+            }
+        }
+    });
+
+    *engine_lock = Some(EngineProcess { stdin });
     Ok(())
 }
 
 #[tauri::command]
-async fn load_model(path: String) -> Result<String, String> {
-    println!("LOAD_MODEL CALLED WITH PATH: {}", path);
-    tokio::task::spawn_blocking(move || {
-        {
-            let mut engine = ENGINE.lock().unwrap();
-            if engine.is_none() {
-                start_engine()?;
-            }
-        }
+async fn load_model(app_handle: AppHandle, path: String) -> Result<String, String> {
+    eprintln!("LOAD_MODEL EXECUTION PATH: {}", path);
+    
+    start_engine(app_handle)?; // Pass handle down
 
+    tokio::task::spawn_blocking(move || {
         let mut engine = ENGINE.lock().unwrap();
         let engine = engine.as_mut().unwrap();
 
-        // ⭐ SEND THE OPEN COMMAND EXACTLY LIKE THE CONSOLE
-        writeln!(engine.stdin, "OPEN default {}", path)
-            .map_err(|e| e.to_string())?;
+        let command = format!("OPEN default {}\n", path);
+        engine.stdin.write_all(command.as_bytes()).map_err(|e| e.to_string())?;
+        engine.stdin.flush().map_err(|e| e.to_string())?;
 
-        // ⭐ READ ONE LINE OF RESPONSE (e.g., "MODEL LOADED OK")
-        let mut output = String::new();
-        engine.stdout.read_line(&mut output)
-            .map_err(|e| e.to_string())?;
-
-        Ok(output)
+        Ok("Model command sent".to_string())
     })
     .await
     .unwrap()
@@ -65,26 +85,23 @@ async fn load_model(path: String) -> Result<String, String> {
 async fn chat(prompt: String) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
         let mut engine = ENGINE.lock().unwrap();
-        let engine = engine.as_mut().ok_or("engine not started")?;
+        let engine = engine.as_mut().ok_or("Engine process not active")?;
 
-        // ⭐ SEND CHAT COMMAND
-        writeln!(engine.stdin, "CHAT {}", prompt)
-            .map_err(|e| e.to_string())?;
+        let command = format!("CHAT {}\n", prompt);
+        engine.stdin.write_all(command.as_bytes()).map_err(|e| e.to_string())?;
+        engine.stdin.flush().map_err(|e| e.to_string())?;
 
-        // ⭐ READ ONE LINE OF RESPONSE
-        let mut output = String::new();
-        engine.stdout.read_line(&mut output)
-            .map_err(|e| e.to_string())?;
-
-        Ok(output)
+        // ⭐ Return an empty string or status so the frontend ignores this value
+        Ok("OK".to_string())
     })
     .await
     .unwrap()
 }
 
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![load_model, chat])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .expect("Runtime panic inside Tauri layout");
 }
