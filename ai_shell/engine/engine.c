@@ -167,47 +167,6 @@ int engine_feed_system_prompt(engine_t* e, const char* system_text) {
         return decode_rc;
     }
 
-    //int32_t n_past = batch.pos[0];
-    //if (decode_rc != 0) {
-    //    llama_memory_t mem = llama_get_memory(e->ctx);
-    //    if (mem) {
-    //        const int32_t system_prompt_tokens = 512;
-    //        const int32_t discard_chunk = 512;
-
-    //        const int32_t remove_start = system_prompt_tokens;
-    //        const int32_t remove_end = system_prompt_tokens + discard_chunk;
-
-    //        // 1. Remove the targeted history block
-    //        //llama_memory_seq_rm(mem, 0, remove_start, remove_end);
-    //        llama_memory_seq_rm(mem, e->seq_id, remove_start, remove_end);
-
-    //        // 2. Slide subsequent context slots back
-    //        //llama_memory_seq_add(mem, 0, remove_end, -1, -discard_chunk);
-
-    //        llama_memory_seq_add(mem, e->seq_id, remove_end, -1, -discard_chunk);
-
-    //        // 3. RE-ALIGNMENT FIX:
-    //        // Read where the KV cache physically ends after the shift.
-    //        // For sequence 0, the next valid token position MUST be exactly 512 (X + 1)
-    //        e->pos -= discard_chunk;
-
-    //        // Explicitly write the corrected positions directly into the batch arrays
-    //        for (int32_t i = 0; i < batch.n_tokens; ++i) {
-    //            batch.pos[i] = e->pos + i;
-    //        }
-
-    //        // 4. Retry the decoding operations with clean positions
-    //        decode_rc = llama_decode(e->ctx, batch);
-    //        if (decode_rc != 0) {
-    //            batch.n_tokens = 0;
-    //            return decode_rc;
-    //        }
-    //    }
-    //    else {
-    //        batch.n_tokens = 0;
-    //        return decode_rc;
-    //    }
-    //}
 
     // Update your application context states
     e->pos = pos;
@@ -309,51 +268,6 @@ int engine_feed_user(engine_t* e, const char* user_text_raw) {
     // 7. Dynamic memory cleanup 
     free(tokens);
 
-    // REMOVED: llama_batch_free(batch) is gone. 
-    // The memory drops out of local stack scopes automatically without ntdll.dll tracking problems!
-
-    //if (decode_rc != 0) {
-    //    return decode_rc; // Let the main generator handle the context shift if it overflows here
-    //}
-   // int32_t n_past = batch.pos[0];
-    //if (decode_rc != 0) {
-    //    llama_memory_t mem = llama_get_memory(e->ctx);
-    //    if (mem) {
-    //        const int32_t system_prompt_tokens = 512;
-    //        const int32_t discard_chunk = 512;
-
-    //        const int32_t remove_start = system_prompt_tokens;
-    //        const int32_t remove_end = system_prompt_tokens + discard_chunk;
-
-    //        // 1. Remove the targeted history block            
-    //        llama_memory_seq_rm(mem, e->seq_id, remove_start, remove_end);
-
-    //        // 2. Slide subsequent context slots back     
-    //        llama_memory_seq_add(mem, e->seq_id, remove_end, -1, -discard_chunk);
-
-    //        // 3. RE-ALIGNMENT FIX:
-    //        // Read where the KV cache physically ends after the shift.
-    //        // For sequence 0, the next valid token position MUST be exactly 512 (X + 1)
-    //        e->pos -= discard_chunk;
-
-    //        // Explicitly write the corrected positions directly into the batch arrays
-    //        for (int32_t i = 0; i < batch.n_tokens; ++i) {
-    //            batch.pos[i] = e->pos + i;
-    //        }
-
-    //        // 4. Retry the decoding operations with clean positions
-    //        decode_rc = llama_decode(e->ctx, batch);
-    //        if (decode_rc != 0) {
-    //            batch.n_tokens = 0;
-    //            return decode_rc;
-    //        }
-    //    }
-    //    else {
-    //        batch.n_tokens = 0;
-    //        return decode_rc;
-    //    }
-    //}
-
 
     // 8. Commit tracker values on success states
     e->pos = current_pos;
@@ -363,147 +277,6 @@ int engine_feed_user(engine_t* e, const char* user_text_raw) {
     return 0;
 }
 
-
-
-//// ---------------------------------------------------------------------------
-//// Generate assistant reply incrementally - STABLE NATIVE BATCH - safe mode
-//// ------------------------------------------------------------------------
-//
-//int engine_generate_reply(
-//    engine_t* e,
-//    char* out,
-//    size_t out_size,
-//    int max_tokens)
-//{
-//    if (!e || !e->model || !e->ctx || !out || out_size == 0) return -1;
-//
-//    const struct llama_vocab* vocab = llama_model_get_vocab(e->model);
-//    size_t out_len = 0;
-//    int n_gen = 0;
-//
-//    out[0] = '\0';
-//
-//    llama_token eos_tok = llama_token_eos(vocab);
-//    llama_token eot_tok = llama_token_eot(vocab);
-//
-//    while (n_gen < max_tokens && out_len + 8 < out_size) {
-//        llama_token tok = engine_sample_next(e);
-//
-//        if (tok == eos_tok || tok == eot_tok || llama_token_is_control(vocab, tok) || llama_token_is_eog(vocab, tok)) {
-//            break;
-//        }
-//
-//        char buf[128] = { 0 };
-//        int n = llama_token_to_piece(vocab, tok, buf, sizeof(buf), 0, false);
-//        if (n <= 0) {
-//            break;
-//        }
-//
-//        if (out_len + (size_t)n >= out_size) {
-//            break;
-//        }
-//
-//        memcpy(out + out_len, buf, n);
-//        out_len += n;
-//        out[out_len] = '\0';
-//
-//        if (strstr(out, "<|eot_id|") != NULL) {
-//            char* p = strstr(out, "<|eot_id|");
-//            *p = '\0';
-//            out_len = strlen(out);
-//            break;
-//        }
-//        if (strstr(out, "<|start_header_id") != NULL) {
-//            char* p = strstr(out, "<|start_header_id");
-//            *p = '\0';
-//            out_len = strlen(out);
-//            break;
-//        }
-//
-//        // 3. Initialize a MANAGED Single-Token Batch structure natively
-//        struct llama_batch batch = llama_batch_init(1, 0, 1);
-//
-//        // 4. Native internal parameter mapping loop for a single token
-//        int32_t token_index = batch.n_tokens;
-//        batch.token[token_index] = tok;
-//        batch.pos[token_index] = e->pos;
-//        batch.n_seq_id[token_index] = 1;
-//        batch.seq_id[token_index][0] = e->seq_id;
-//        batch.logits[token_index] = 1; // Always request logits for consecutive generations
-//        batch.n_tokens++;
-//
-//        // 5. Decode token tracking parameters safely
-//        int decode_rc = 0;
-//        decode_rc = llama_decode(e->ctx, batch);
-//        if (decode_rc != 0) {
-//            llama_memory_t mem = llama_get_memory(e->ctx);
-//            if (mem) {
-//                // 1. Fetch the exact active context size allocated for this session
-//                int32_t active_ctx_size = llama_n_ctx(e->ctx);
-//
-//                // 2. Safely lock your system prompt reservation limits
-//                const int32_t system_prompt_tokens = 512;
-//
-//                // 3. ADAPTIVE SHIFTING MATH:
-//                // Clear out roughly 25% of the total window size, with a fallback ceiling
-//                int32_t discard_chunk = active_ctx_size / 4;
-//                if (discard_chunk < 512)  discard_chunk = 512;
-//                if (discard_chunk > 2048) discard_chunk = 2048; // Don't wipe too much chat memory at once
-//
-//                const int32_t remove_start = system_prompt_tokens;
-//                const int32_t remove_end = system_prompt_tokens + discard_chunk;
-//
-//                // Verify that we aren't trying to remove more than the total context window size
-//                if (remove_end >= active_ctx_size) {
-//                    // Panic check: model window is too small to even hold these constraints
-//                    llama_batch_free(batch);
-//                    return decode_rc;
-//                }
-//
-//                // 4. Remove and slide context memory safely
-//                llama_memory_seq_rm(mem, e->seq_id, remove_start, remove_end);
-//                llama_memory_seq_add(mem, e->seq_id, remove_end, -1, -discard_chunk);
-//
-//                // 5. Re-align your structural engine history tracking positions
-//                e->pos -= discard_chunk;
-//
-//                // Restore the batch token counter back to 1 explicitly
-//                batch.n_tokens = 1;
-//
-//                // Explicitly assign to index [0] of the batch array pointers.
-//                batch.token[0] = tok;
-//                batch.pos[0] = e->pos;
-//                batch.n_seq_id[0] = 1;
-//                batch.seq_id[0][0] = e->seq_id;
-//                batch.logits[0] = 1;
-//
-//                // Retry decoding the token onto the cleared cache timelines
-//                decode_rc = llama_decode(e->ctx, batch);
-//                if (decode_rc != 0) {
-//                    llama_batch_free(batch);
-//                    return decode_rc;
-//                }
-//            }
-//            else {
-//                llama_batch_free(batch);
-//                return decode_rc;
-//            }
-//        }
-//
-//        // 6. Free managed batch tracking objects
-//        llama_batch_free(batch);
-//
-//        if (decode_rc != 0) {
-//            break;
-//        }
-//
-//        e->pos++;
-//        e->kv_len = e->pos;
-//        n_gen++;
-//    }
-//
-//    return (int)out_len;
-//}
 
 int engine_generate_reply(
     engine_t* e,
@@ -523,40 +296,28 @@ int engine_generate_reply(
     llama_token eos_tok = llama_token_eos(vocab);
     llama_token eot_tok = llama_token_eot(vocab);
 
-    // ------------------------------------------------------------
     // 1. Allocate ONE batch and reuse it for all tokens
-    // ------------------------------------------------------------
     struct llama_batch batch = llama_batch_init(1, 0, 1);
 
     while (n_gen < max_tokens && out_len + 8 < out_size) {
-
-        // --------------------------------------------------------
-        // 2. Sample next token
-        // --------------------------------------------------------
+        // 2. Sample next token from current logits
         llama_token tok = engine_sample_next(e);
 
-        // Fast stop conditions
+        // Stop conditions
         if (tok == eos_tok || tok == eot_tok || llama_token_is_control(vocab, tok))
             break;
 
-        // --------------------------------------------------------
-        // 3. Convert token → text
-        // --------------------------------------------------------
+        // 3. Token → text
         char piece[256];
         int n = llama_token_to_piece(vocab, tok, piece, sizeof(piece), 0, false);
-        if (n <= 0)
-            break;
-
-        if (out_len + n >= out_size)
+        if (n <= 0 || out_len + (size_t)n >= out_size)
             break;
 
         memcpy(out + out_len, piece, n);
         out_len += n;
         out[out_len] = '\0';
 
-        // --------------------------------------------------------
-        // 4. Prepare batch for decode
-        // --------------------------------------------------------
+        // 4. Prepare batch for next decode
         batch.n_tokens = 1;
         batch.token[0] = tok;
         batch.pos[0] = e->pos;
@@ -564,43 +325,24 @@ int engine_generate_reply(
         batch.seq_id[0][0] = e->seq_id;
         batch.logits[0] = 1;
 
-        // --------------------------------------------------------
-        // 5. Decode (fast path)
-        // --------------------------------------------------------
+        // 5. Decode (single call, no retry, no KV surgery)
         int rc = llama_decode(e->ctx, batch);
-        if (rc != 0)
-            break;
-
-       /* int rc = llama_decode(e->ctx, batch);
         if (rc != 0) {
             llama_batch_free(batch);
             return rc;
-        }*/
+        }
 
-
-        // --------------------------------------------------------
         // 6. Advance engine state
-        // --------------------------------------------------------
         e->pos++;
         e->kv_len = e->pos;
         n_gen++;
     }
 
     llama_batch_free(batch);
-    if(was_chat_console == true) // console flag
-    {
-    // print the generated text to console
-    printf("%s", out);
-    fflush(stdout);
-    was_chat_console - false;
-    return 0;
-    }
-    else
-    {
-        return (int)out_len;  //Web return
-    }    
-    //return (int)out_len;
+    return (int)out_len;
 }
+
+
 
 // ------------------------------------------------------------
 // HTML chat entry point - Complete Separated Plugin & UI Merge Pipeline
@@ -764,7 +506,22 @@ int engine_chat_html(
 
     free(model_reply);
 
-    return (int)strlen(out);
+    if (was_chat_console == true) // console flag
+    {
+        // print the generated text to console
+        printf("%s", out);
+        fflush(stdout);
+        was_chat_console = false;
+        return 0;
+    }
+    else
+    {
+        return (int)strlen(out);  //Web return
+    }
+
+
+
+   // return (int)strlen(out);
 }
  
 
@@ -808,23 +565,10 @@ engine_t* engine_open(const char* model_path) {
     const char* vmm_use = getenv("LLAMA_VMM_USE");
 
     char vmm_path[MAX_PATH];
-    snprintf(vmm_path, sizeof(vmm_path), "C:\\Users\\Bobio\\source\\ai_shell\\vmm.bin");
+    snprintf(vmm_path, sizeof(vmm_path), "vmm.bin");
     int vmm_initm = 0;
     
     vmm_initm = vmm_init(vmm_path, vmm_build ? 1 : 0);
-
-        //if (vmm_build) {
-    //    fprintf(stderr, "[ENGINE] VMM BUILD MODE\n");
-      
-    //    vmm_open_build(vmm_path);
-
-    //    vmm_open_build("vmm.bin");   // MUST HAPPEN FIRST
-    //}
-
-    //if (vmm_use) {
-    //    fprintf(stderr, "[ENGINE] VMM USE MODE\n");
-    //    vmm_open_use("vmm.bin");     // MUST HAPPEN FIRST
-    //}
 
 
     // 2. NOW load model (this triggers load_all_data → vmm_write/read)
