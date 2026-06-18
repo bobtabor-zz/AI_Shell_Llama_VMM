@@ -50,6 +50,96 @@ body, html, #root {
     font-size: 0.9rem;
 }
 
+/* Model Switching Enhancements */
+.model-list {
+    padding: 0;
+    margin: 0;
+    list-style: none;
+}
+
+.model-item {
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+    color: #b5bac1;
+}
+
+    .model-item:hover {
+        background: #35373c;
+        color: #f5f5f5;
+    }
+
+    .model-item.selected {
+        background: #4c6fff;
+        color: #ffffff;
+        font-weight: 600;
+        box-shadow: 0 2px 8px rgba(76, 111, 255, 0.3);
+    }
+
+
+
+/* Sidebar History Layout Upgrades */
+.history-list {
+    max-height: 220px;
+    overflow-y: auto;
+    margin-bottom: 12px;
+    padding: 0;
+}
+
+.history-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    list-style: none;
+    transition: background 0.2s ease;
+    gap: 8px;
+}
+
+    .history-item:hover {
+        background: #3a3c40;
+    }
+
+    .history-item.active {
+        background: #4c6fff4d;
+        border-left: 3px solid #4c6fff;
+        font-weight: bold;
+    }
+
+.history-text {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Delete Trash Button Visual Styles */
+.delete-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 6px;
+    font-size: 0.8rem;
+    border-radius: 4px;
+    opacity: 0.3; /* Faded out by default */
+    transition: opacity 0.2s, background 0.2s;
+}
+
+/* Only highlight the trash bin when pointing at the row element */
+.history-item:hover .delete-btn {
+    opacity: 0.8;
+}
+
+.delete-btn:hover {
+    opacity: 1 !important;
+    background: #ff4d4d33; /* Red highlight on direct hover */
+}
+
+
 /* Chat window */
 
 .chat-window {
