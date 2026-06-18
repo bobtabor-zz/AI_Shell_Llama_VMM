@@ -186,6 +186,21 @@ static void dispatch(char* line) {
 
     }
 
+    else if (strncmp(line, "UNLOAD", 6) == 0) {
+            if (g_engine) {
+                engine_close(g_engine);
+                g_engine = NULL;
+                printf("MODEL UNLOADED\n");
+                fflush(stdout);
+            }
+            else {
+                printf("NO MODEL LOADED\n");
+                fflush(stdout);
+            }
+            return;
+    }
+
+
     else if (strcmp(cmd, "CHAT") == 0) {
         char reply[4096];
 
