@@ -3,7 +3,11 @@ something from google ai
 
 Would you like to prepend a tag marker to the titles (such as changing "title" to "[Google] Title") so your GGUF model can distinguish whether a text result came from Wikipedia, Google, or DuckDuckGo?
 
+ai_shell_desktop:
 
+Now that your conversational data flow is working properly, what would you like to tackle next? I can help you with:Handling Multi-line Streaming: Showing text tokens dynamically as the model generates them,
+rather than waiting for the entire block to finish.Auto-Scrolling: Setting up the message layout area to automatically scroll down whenever a new bubble is added.Chat History Sessions:
+Saving older conversations to your Sidebar component using Tauri's file system or local storage plugins.Let me know which feature you want to add next!
 
 
 
