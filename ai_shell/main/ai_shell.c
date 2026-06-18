@@ -171,28 +171,10 @@ static void dispatch(char* line) {
 
     const char* cmd = cmd_buf;
 
-   if (strcmp(cmd, "OPEN") == 0) {
+    if (strcmp(cmd, "OPEN") == 0) {
         cmd_open(argc, argv);
+
     }
-
-  //if (strncmp(line, "OPEN", 4) == 0) {
-  //    char slot[64], path[4096];
-
-  //    if (sscanf(line, "OPEN %63s %4095s", slot, path) == 2) {
-  //        printf("[engine] Loading model: %s\n", path);
-  //        fflush(stdout);
-
-  //        g_engine = engine_open(path);
-
-  //        printf("MODEL LOADED OK\n");
-   //       fflush(stdout);
-  //    }
-  //    else {
-  //        printf("ERROR: OPEN syntax is OPEN <slot> <path>\n");
-  //        fflush(stdout);
- //     }
- //     return;
- // }
 
     else if (strcmp(cmd, "CLOSE") == 0) {
         cmd_close(argc, argv);
@@ -206,8 +188,10 @@ static void dispatch(char* line) {
 
     else if (strcmp(cmd, "CHAT") == 0) {
         char reply[4096];
-        was_chat_console = true;        
-       char user_msg[4096] = { 0 };
+
+        was_chat_console = true;
+
+        char user_msg[4096] = { 0 };
         for (int i = 1; i < argc; i++) {
             strcat(user_msg, argv[i]);
             if (i + 1 < argc) strcat(user_msg, " ");
@@ -218,7 +202,7 @@ static void dispatch(char* line) {
             return;
         }
 
-        if (engine_chat(g_engine, user_msg, reply, sizeof(reply)) == 0) {
+        if (engine_chat_html(g_engine, user_msg, reply, sizeof(reply)) == 0) {
             //printf("AI> %s\n", reply);
         }
         else {
