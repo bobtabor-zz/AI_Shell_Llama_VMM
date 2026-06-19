@@ -13,6 +13,26 @@
 
 char* g_plugin_result = NULL;
 
+
+static llama_token tokenize_single(
+    const struct llama_vocab* vocab,
+    const char* s
+) {
+    llama_token tmp[8];
+    int n = llama_tokenize(
+        vocab,
+        s,
+        (int)strlen(s),
+        tmp,
+        8,
+        true,   // add_special
+        true    // parse_special
+    );
+    return (n > 0 ? tmp[0] : -1);
+}
+
+
+
 char* engine_json_extract_string(char* s, char* out, size_t out_sz)
 {
     size_t pos = 0;
@@ -163,15 +183,29 @@ static void wrap_phi3_user(char* dst, size_t n, const char* usr) {
     snprintf(dst, n, "<|user|>\n%s\n<|assistant|>\n", usr);
 }
 
+//// ---- SmolLM ----
 
-// ---- SmolLM ----
+// System prompt
 static void wrap_smollm_system(char* dst, size_t n, const char* sys) {
-    snprintf(dst, n, "<s>[INST] <<SYS>>\n%s\n<</SYS>>\n", sys);
+    snprintf(dst, n,
+        "<|im_start|>system\n"
+        "%s\n"
+        "<|im_end|>\n",
+        sys
+    );
 }
-// <s>[INST] hello [/INST]
+
+// User message
 static void wrap_smollm_user(char* dst, size_t n, const char* usr) {
-    snprintf(dst, n, "%s [/INST]", usr);
+    snprintf(dst, n,
+        "<|im_start|>user\n"
+        "%s\n"
+        "<|im_end|>\n"
+        "<|im_start|>assistant\n",   // Important: end with this so the model starts generating
+        usr
+    );
 }
+
 
 
 // ---- Mistral ----
@@ -468,26 +502,27 @@ int engine_generate_reply(
         // 2. Sample next token from current logits
         llama_token tok = engine_sample_next(e);
 
-        // Stop conditions
-        /*  if (tok == eos_tok || tok == eot_tok || llama_token_is_control(vocab, tok))
-            break;*/
-
-        if (tok == eot_tok)
+        // Hard stop: explicit EOT (if defined)
+        if (tok == eot_tok && eot_tok != -1)
             break;
 
-            // 1. Stop on EOS
+        // 1. Stop on EOS
         if (tok == eos_tok)
             break;
 
-        // 2. Stop on control tokens (Llama‑3, Qwen, Gemma)
+        // 2. Stop on control tokens (Llama‑3, Qwen, Gemma, etc.)
         if (llama_token_is_control(vocab, tok))
             break;
 
-        // 3. Dynamic Model Guard: Stop if the model re-emits a user/instruction token
-        // This stops SmolLM/Llama-2 if they try to start a new loop
-        if (n_gen > 0 && (tok == e->assistant_tok || tok == llama_token_bos(vocab)))
+        //// 3. SmolLM / Llama‑2: stop only AFTER assistant has started
+       
+        // 4. Phi‑3 / Qwen: stop if model re‑emits assistant tag after start
+        if (n_gen > 0 && e->assistant_tok != -1 && tok == e->assistant_tok)
             break;
-        // -----------------------------
+
+        // 5. Phi‑3: stop after first newline once assistant has started
+        if (tok == '\n' && n_gen > 0)
+            break;
 
         // 3. Token → text
         char piece[256];
@@ -495,13 +530,15 @@ int engine_generate_reply(
         if (n <= 0 || out_len + (size_t)n >= out_size)
             break;
 
-        // FIX: Check for SmolLM, Llama-2, and Phi-3 turn-enders
-        if (strstr(piece, "<|end|>") != NULL ||
-            strstr(piece, "<|assistant|>") != NULL ||
-            strstr(piece, "[/INST]") != NULL ||
-            strstr(piece, "<</SYS>>") != NULL) {
-            break;
-        }
+        // FIX: Only stop on text turn-enders AFTER the assistant has actually started typing words
+        //if (n_gen > 0) {
+            if (strstr(piece, "<|end|>") != NULL ||
+                strstr(piece, "<|assistant|>") != NULL ||
+                strstr(piece, "[/INST]") != NULL ||
+                strstr(piece, "<</SYS>>") != NULL) {
+                break;
+            }
+        //}
 
 
         memcpy(out + out_len, piece, n);
@@ -771,28 +808,18 @@ engine_t* engine_open(const char* model_path) {
         return NULL;
     }
 
-
-    const struct llama_vocab* vocab = llama_model_get_vocab(e->model);
-
-    // Detect <|assistant|> token for Phi‑3        
-    llama_token tmp[8];
-    int n = llama_tokenize(
-        vocab,
-        "<|assistant|>",
-        strlen("<|assistant|>"),
-        tmp,
-        8,
-        true,
-        true
-    );
-
-    llama_token assistant_tok = (n > 0 ? tmp[0] : -1);
-
     // ⭐ Detect model family here
-        g_model_family = detect_model_family(model_path, e->model);
+    g_model_family = detect_model_family(model_path, e->model);
     printf("[engine] detected model family: %d\n", (int)g_model_family);
 
-   
+    const struct llama_vocab* vocab = llama_model_get_vocab(e->model);
+    
+    // Phi‑3 / Qwen
+    e->assistant_tok = tokenize_single(vocab, "<|assistant|>");
+
+    // SmolLM / Llama‑2
+     //e->sys_end_tok = tokenize_single(vocab, "[/INST]");   //flipped
+     //e->inst_end_tok = tokenize_single(vocab, "<</SYS>>");  //flipped
 
     // 3. Create context
     struct llama_context_params cparams = llama_context_default_params();

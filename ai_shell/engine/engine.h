@@ -46,6 +46,8 @@ extern "C" {
 
         // ⭐ KV subsystem
         llama_token assistant_tok;
+        llama_token inst_end_tok;
+        llama_token sys_end_tok;
 
         bool    kv_valid;      // is there a meaningful sequence in KV?
         int64_t kv_len;        // how many tokens are currently in KV?
