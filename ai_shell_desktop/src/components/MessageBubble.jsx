@@ -2,50 +2,59 @@ import React from "react";
 import ReactMarkdown from "react-markdown";
 
 export default function MessageBubble({ role, content }) {
-    // Helper function to safely detect and process search payload JSON strings
+    // Helper function to process raw server JSON payload data strings
     const parseContent = (rawContent) => {
         if (typeof rawContent !== "string") return rawContent;
 
         const trimmed = rawContent.trim();
-        // Look for typical JSON brackets
+
+        // Check if the incoming message is a raw server JSON payload object string
         if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
             try {
                 const parsed = JSON.parse(trimmed);
+                let markdownString = "";
 
-                // Construct a structured Markdown layout out of the raw response payload
-                let markdownString = `### 🔍 Results for "${parsed.query || 'Search'}"\n\n`;
-                markdownString += `${parsed.message || ''}\n\n`;
+                if (parsed.query) markdownString += `### 🔍 Search: "${parsed.query}"\n\n`;
+                if (parsed.message) markdownString += `*${parsed.message}*\n\n`;
 
                 if (parsed.results && Array.isArray(parsed.results)) {
-                    parsed.results.forEach((item) => {
-                        // Filter out non-image aggregate pages like pexels search directories
-                        const isDirectImage = /\.(jpg|jpeg|png|gif|webp)/i.test(item.url) || item.url?.includes("staticflickr");
+                    parsed.results.forEach((item, index) => {
+                        const associatedImg = parsed.images && parsed.images[index];
 
-                        if (isDirectImage) {
-                            // Format image template: ![alt text](url "Title text component")
-                            markdownString += `![${item.title || 'Cat Picture'}](${item.url} "${item.title || ''}")\n\n`;
-                        } else if (item.url) {
-                            // Fallback link format for standard external search pages
-                            markdownString += `* **Source:** [${item.title || item.url}](${item.url})\n\n`;
+                        // FIX: We pass a single image syntax block, but clean up inner quotes
+                        if (associatedImg) {
+                            const safeTitle = (item.title || "")
+                                .replace(/"/g, "'")
+                                .replace(/[\n\r]+/g, " ");
+
+                            // We render a standard custom markdown image element block
+                            markdownString += `![${item.source || "Image"}](${associatedImg} "${safeTitle}")\n\n`;
+                        } else if (item.title) {
+                            // Fallback text rendering ONLY if there is no image block for this index slot
+                            markdownString += `**Source (${item.source || "Web"}):** ${item.title}\n\n`;
+                            if (item.url) {
+                                markdownString += `[View Web Link](${item.url})\n\n`;
+                            }
+                            markdownString += `---\n\n`;
                         }
                     });
                 }
                 return markdownString;
             } catch (e) {
-                // If parsing fails, fall back to rendering the raw text string gracefully
                 return rawContent;
             }
         }
+
         return rawContent;
     };
 
     const displayMarkdown = parseContent(content);
 
     return (
-        <div className={`bubble ${role}`}>
+        <div className={`bubble ${role}`} style={styles.bubbleContainer}>
             <ReactMarkdown
                 components={{
-                    // Intercept and style link components
+                    // Custom interceptor logic for standard hyperlinks
                     a: ({ node, ...props }) => (
                         <span style={styles.urlContainer}>
                             <span style={styles.urlLabel}>Link:</span>
@@ -57,17 +66,21 @@ export default function MessageBubble({ role, content }) {
                             />
                         </span>
                     ),
-                    // Intercept and style image components as card containers
+                    // Custom card container logic for rendering visual blocks vertically
                     img: ({ node, ...props }) => (
                         <div style={styles.card}>
                             <a href={props.src} target="_blank" rel="noopener noreferrer" style={styles.imgLink}>
                                 <img
                                     {...props}
                                     style={styles.cardImg}
-                                    alt={props.alt || "Search item"}
+                                    alt={props.alt || "Search item image"}
                                 />
                             </a>
-                            {props.title && <div style={styles.cardTitle}>{props.title}</div>}
+                            {props.title && (
+                                <div style={styles.cardTitle}>
+                                    <strong>Source ({props.alt || "Web"}):</strong> {props.title}
+                                </div>
+                            )}
                         </div>
                     ),
                     code: ({ node, inline, ...props }) =>
@@ -94,52 +107,59 @@ export default function MessageBubble({ role, content }) {
     );
 }
 
-// Scannable layouts for the parsed card blocks
+// Scannable, modern block layouts that force downward vertical stacking
 const styles = {
+    bubbleContainer: {
+        display: 'block',
+        width: '100%',
+        clear: 'both',
+        boxSizing: 'border-box'
+    },
     card: {
         backgroundColor: '#ffffff',
         border: '1px solid #e1e8ed',
         borderRadius: '10px',
         overflow: 'hidden',
-        display: 'inline-flex',
-        flexDirection: 'column',
+        display: 'block',            // Forces each card container onto its own line
         width: '100%',
-        maxWidth: '280px',
-        margin: '10px 8px 10px 0',
+        maxWidth: '480px',           // Keeps the card compact on larger screens
+        margin: '16px 0',            // Provides clear spacing between stacked items
         boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-        verticalAlign: 'top'
+        boxSizing: 'border-box'
     },
     imgLink: {
         display: 'block',
-        height: '160px',
-        backgroundColor: '#000'
+        width: '100%',
+        backgroundColor: '#f8f9fa'
     },
     cardImg: {
-        width: '100%',
-        height: '100%',
-        objectFit: 'cover'
+        width: '100%',               // Forces scaling down to fit the container bounds
+        maxWidth: '100%',            // Prevents spilling off the edge of mobile screens
+        height: 'auto',              // Preserves the image's original aspect ratio
+        maxHeight: '280px',          // Restricts overly tall vertical images
+        objectFit: 'contain',        // Ensures the whole photo is visible without cropping
+        display: 'block'
     },
     cardTitle: {
-        padding: '8px 12px',
-        fontSize: '0.8rem',
+        padding: '12px 16px',
+        fontSize: '0.88rem',
         color: '#2c3e50',
         borderTop: '1px solid #e1e8ed',
         backgroundColor: '#f8f9fa',
-        fontWeight: '500',
-        lineHeight: '1.3',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap'
+        lineHeight: '1.5',
+        overflow: 'visible',         // Allows descriptions to wrap fully
+        whiteSpace: 'normal',        // Prevents truncation dots from cutting text off
+        wordBreak: 'break-word'
     },
     urlContainer: {
-        display: 'inline-block',
+        display: 'block',            // Forces links onto their own rows
         backgroundColor: '#fdf6e2',
         border: '1px solid #f5e6c4',
-        padding: '2px 6px',
-        borderRadius: '4px',
-        margin: '2px 4px',
-        wordBreak: 'break-all',
-        verticalAlign: 'middle'
+        padding: '8px 12px',
+        borderRadius: '6px',
+        margin: '8px 0',
+        maxWidth: '480px',
+        wordBreak: 'break-all'
     },
     urlLabel: {
         fontSize: '0.65rem',
@@ -150,7 +170,7 @@ const styles = {
     },
     highlightedUrl: {
         color: '#dd4b39',
-        fontSize: '0.82rem',
+        fontSize: '0.85rem',
         fontWeight: '600',
         textDecoration: "underline"
     }
