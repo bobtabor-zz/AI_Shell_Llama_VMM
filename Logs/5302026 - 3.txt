@@ -1,0 +1,13 @@
+
+
+
+open G:\Bob_Files\Projects\AI_Shell-main\smollm-1.7b-instruct-q4_k_m.gguf
+
+
+open G:\Bob_Files\Projects\AI_Shell-main\Phi-3-mini-4k-instruct-q4.gguf
+
+
+open G:\Bob_Files\Projects\AI_Shell-main\Phi-3-mini-4k-instruct-q4.gguf
+
+
+open G:\Bob_Files\Projects\AI_Shell-main\Meta-Llama-3-8B-Instruct.Q8_0.gguf
