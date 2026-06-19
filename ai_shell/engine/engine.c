@@ -139,7 +139,7 @@ static model_family_t detect_model_family(const char* path, struct llama_model* 
 // ---- Llama‑3 ----
 static void wrap_llama3_system(char* dst, size_t n, const char* sys) {
     snprintf(dst, n,
-        "<|start_header_id|>system<|end_header_id|>\n\n"
+        "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
         "%s<|eot_id|>\n",
         sys
     );
@@ -153,7 +153,6 @@ static void wrap_llama3_user(char* dst, size_t n, const char* usr) {
         usr
     );
 }
-
 
 // ---- Phi‑3 ----
 static void wrap_phi3_system(char* dst, size_t n, const char* sys) {
@@ -169,7 +168,7 @@ static void wrap_phi3_user(char* dst, size_t n, const char* usr) {
 static void wrap_smollm_system(char* dst, size_t n, const char* sys) {
     snprintf(dst, n, "<s>[INST] <<SYS>>\n%s\n<</SYS>>\n", sys);
 }
-
+// <s>[INST] hello [/INST]
 static void wrap_smollm_user(char* dst, size_t n, const char* usr) {
     snprintf(dst, n, "%s [/INST]", usr);
 }
@@ -455,21 +454,6 @@ int engine_generate_reply(
 
     const struct llama_vocab* vocab = llama_model_get_vocab(e->model);
 
-    // Detect <|assistant|> token for Phi‑3        
-    llama_token tmp[8];
-    int n = llama_tokenize(
-        vocab,
-        "<|assistant|>",
-        strlen("<|assistant|>"),
-        tmp,
-        8,
-        true,
-        true
-    );
-
-    llama_token assistant_tok = (n > 0 ? tmp[0] : -1);
-
-
     out[0] = '\0';
     size_t out_len = 0;
     int n_gen = 0;
@@ -488,6 +472,9 @@ int engine_generate_reply(
         /*  if (tok == eos_tok || tok == eot_tok || llama_token_is_control(vocab, tok))
             break;*/
 
+        if (tok == eot_tok)
+            break;
+
             // 1. Stop on EOS
         if (tok == eos_tok)
             break;
@@ -496,14 +483,10 @@ int engine_generate_reply(
         if (llama_token_is_control(vocab, tok))
             break;
 
-        // 3. Phi‑3: stop after first newline once assistant has started
-        if (tok == '\n' && n_gen > 0)
+        // 3. Dynamic Model Guard: Stop if the model re-emits a user/instruction token
+        // This stops SmolLM/Llama-2 if they try to start a new loop
+        if (n_gen > 0 && (tok == e->assistant_tok || tok == llama_token_bos(vocab)))
             break;
-
-        // 4. Stop if model emits another assistant tag (Phi‑3 hallucination guard)
-        if (tok == e->assistant_tok && n_gen > 0)
-            break;
-
         // -----------------------------
 
         // 3. Token → text
@@ -511,6 +494,15 @@ int engine_generate_reply(
         int n = llama_token_to_piece(vocab, tok, piece, sizeof(piece), 0, false);
         if (n <= 0 || out_len + (size_t)n >= out_size)
             break;
+
+        // FIX: Check for SmolLM, Llama-2, and Phi-3 turn-enders
+        if (strstr(piece, "<|end|>") != NULL ||
+            strstr(piece, "<|assistant|>") != NULL ||
+            strstr(piece, "[/INST]") != NULL ||
+            strstr(piece, "<</SYS>>") != NULL) {
+            break;
+        }
+
 
         memcpy(out + out_len, piece, n);
         out_len += n;
@@ -778,6 +770,23 @@ engine_t* engine_open(const char* model_path) {
         free(e);
         return NULL;
     }
+
+
+    const struct llama_vocab* vocab = llama_model_get_vocab(e->model);
+
+    // Detect <|assistant|> token for Phi‑3        
+    llama_token tmp[8];
+    int n = llama_tokenize(
+        vocab,
+        "<|assistant|>",
+        strlen("<|assistant|>"),
+        tmp,
+        8,
+        true,
+        true
+    );
+
+    llama_token assistant_tok = (n > 0 ? tmp[0] : -1);
 
     // ⭐ Detect model family here
         g_model_family = detect_model_family(model_path, e->model);
