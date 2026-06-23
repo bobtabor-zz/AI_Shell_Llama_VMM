@@ -1,4 +1,5 @@
 // engine.c – incremental llama.cpp-style engine for Llama-3-Instruct
+#include <windows.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -107,18 +108,6 @@ model_family_t g_model_family = MODEL_UNKNOWN;
 // ============================================================================
 static model_family_t detect_model_family(const char* path, struct llama_model* model) {
     const char* arch = NULL;
-
-    // ---- llama.cpp metadata detection ----
-   /* int meta_count = llama_model_meta_count(model);
-    for (int i = 0; i < meta_count; i++) {
-        const char* key = llama_model_meta_key(model, i);
-        if (key && strcmp(key, "general.architecture") == 0) {
-            static char buf[256];
-            llama_model_meta_val_str(model, i, buf, sizeof(buf));
-            arch = buf;
-            break;
-        }
-    }*/
 
     // ---- Filename fallback ----
     char lower[4096];
@@ -476,6 +465,21 @@ int engine_feed_user(engine_t* e, const char* user_text_raw) {
     return 0;
 }
 
+static char* extract_websearch_query(const char* json) {
+    const char* p = strstr(json, "\"query\":\"");
+    if (!p) return NULL;
+
+    p += strlen("\"query\":\"");
+    const char* end = strchr(p, '"');
+    if (!end) return NULL;
+
+    size_t len = end - p;
+    char* out = (char*)malloc(len + 1);
+    memcpy(out, p, len);
+    out[len] = 0;
+    return out;
+}
+
 
 int engine_generate_reply(
     engine_t* e,
@@ -497,6 +501,14 @@ int engine_generate_reply(
 
     // 1. Allocate ONE batch and reuse it for all tokens
     struct llama_batch batch = llama_batch_init(1, 0, 1);
+
+
+    const char* TOOL_PREFIX = "{\"tool\":\"websearch\",\"query\":\"";
+
+    char toolbuf[1024] = { 0 };
+    size_t toolbuf_len = 0;
+    bool tool_json_complete = false;
+
 
     while (n_gen < max_tokens && out_len + 8 < out_size) {
         // 2. Sample next token from current logits
@@ -540,10 +552,67 @@ int engine_generate_reply(
             }
         //}
 
-
         memcpy(out + out_len, piece, n);
         out_len += n;
         out[out_len] = '\0';
+
+        // --- accumulate into tool buffer for JSON detection ---
+        if (toolbuf_len + n < sizeof(toolbuf) - 1) {
+            memcpy(toolbuf + toolbuf_len, piece, n);
+            toolbuf_len += n;
+            toolbuf[toolbuf_len] = '\0';
+        }
+        else {
+            // simple sliding window if overflow
+            size_t keep = sizeof(toolbuf) / 2;
+            memmove(toolbuf, toolbuf + toolbuf_len - keep, keep);
+            toolbuf_len = keep;
+            if (toolbuf_len + n < sizeof(toolbuf) - 1) {
+                memcpy(toolbuf + toolbuf_len, piece, n);
+                toolbuf_len += n;
+                toolbuf[toolbuf_len] = '\0';
+            }
+        }
+
+        // --- detect complete websearch JSON ---
+        char* start = strstr(toolbuf, "{\"tool\":\"websearch\",\"query\":\"");
+        if (start) {
+            char* end = strstr(start, "\"}");
+            if (end) {
+                // full JSON detected
+                size_t json_len = (end + 2) - start;
+                char json_block[512];
+                if (json_len < sizeof(json_block)) {
+                    memcpy(json_block, start, json_len);
+                    json_block[json_len] = 0;
+
+                    // extract query
+                    char* query = extract_websearch_query(json_block);
+                    if (query) {
+                        char* argvv[1];
+                        argvv[0] = query;
+
+                        // --- CALL THE TOOL ---
+                        char* result = plugin_websearch(1, argvv);
+
+                        // free query string
+                        free(query);
+
+                        // you now have the tool result in `result`
+                        // you can inject it into the model or return it
+                        // simplest: append to out and break
+                        if (result) {
+                            strncat(out, "\n\n[WEBSEARCH RESULT]\n", out_size - strlen(out) - 1);
+                            strncat(out, result, out_size - strlen(out) - 1);
+                            free(result);
+                        }
+
+                        break; // stop generation
+                    }
+                }
+            }
+        }
+
 
         // 4. Prepare batch for next decode
         batch.n_tokens = 1;
@@ -569,8 +638,6 @@ int engine_generate_reply(
     llama_batch_free(batch);
     return (int)out_len;
 }
-
-
 
 // ------------------------------------------------------------
 // HTML chat entry point - Complete Separated Plugin & UI Merge Pipeline
@@ -773,7 +840,9 @@ void engine_reset(engine_t* e) {
     e->html_n_turns = 0;
     e->n_turns = 0;
 
-    engine_feed_system_prompt(e, "You are a helpful assistant.");
+    //engine_feed_system_prompt(e, "You are a helpful assistant.");
+    engine_feed_system_prompt(e, TOOL_SYSTEM_PROMPT);
+
 }
 
 
@@ -817,10 +886,6 @@ engine_t* engine_open(const char* model_path) {
     // Phi‑3 / Qwen
     e->assistant_tok = tokenize_single(vocab, "<|assistant|>");
 
-    // SmolLM / Llama‑2
-     //e->sys_end_tok = tokenize_single(vocab, "[/INST]");   //flipped
-     //e->inst_end_tok = tokenize_single(vocab, "<</SYS>>");  //flipped
-
     // 3. Create context
     struct llama_context_params cparams = llama_context_default_params();
 
@@ -842,6 +907,37 @@ engine_t* engine_open(const char* model_path) {
     // Keep sequence scaling optimized for your singular tracking stream
     cparams.n_seq_max = 1;
 
+    // ---------------- PERFORMANCE TUNING ----------------
+    SYSTEM_INFO sysinfo;
+    GetSystemInfo(&sysinfo);
+    int physical_cores = sysinfo.dwNumberOfProcessors;
+    if (physical_cores > 8) physical_cores = 8;
+
+    cparams.n_threads = physical_cores;
+    cparams.n_threads_batch = physical_cores * 2;
+    cparams.flash_attn_type = true;
+    cparams.type_k = GGML_TYPE_F16;
+    cparams.type_v = GGML_TYPE_F16;
+
+#ifdef LLAMA_CONTEXT_PARAMS_HAS_N_UBATCH
+    cparams.n_ubatch = 2048;
+#endif
+    // ---------------- GPU OFFLOAD (optional) ----------------
+    if (llama_supports_gpu_offload()) {
+        mparams.n_gpu_layers = 999;          // offload as many layers as possible
+        mparams.split_mode = LLAMA_SPLIT_MODE_LAYER;
+        printf("[engine] GPU offload enabled\n");
+    }
+    else {
+        mparams.n_gpu_layers = 0;
+        printf("[engine] GPU offload not supported\n");
+    }
+
+    // --------------------------------------------------------
+
+    // Store tuned params for recreate_context()----------------------------------------------------
+    e->ctx_params = cparams;
+    e->model_params = mparams;
     // Allocate memory matching the precise dynamic token ceiling
     e->ctx = llama_new_context_with_model(e->model, cparams);
     if (!e->ctx) {
@@ -850,12 +946,20 @@ engine_t* engine_open(const char* model_path) {
         return NULL;
     }
 
-    if (engine_feed_system_prompt(e, "You are a helpful assistant.") != 0) {
+    /*if (engine_feed_system_prompt(e, "You are a helpful assistant.") != 0) {
+        llama_free(e->ctx);
+        llama_free_model(e->model);
+        free(e);
+        return NULL;
+    }*/
+
+    if (engine_feed_system_prompt(e, TOOL_SYSTEM_PROMPT) != 0) {
         llama_free(e->ctx);
         llama_free_model(e->model);
         free(e);
         return NULL;
     }
+
     vmm_cleanup();
     return e;
 }
