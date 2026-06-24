@@ -126,15 +126,17 @@ extern "C" {
     );
 
     static const char* TOOL_SYSTEM_PROMPT =
-        "You are a helpful assistant with access to a websearch tool.\n"
-        "CRITICAL: If the user's query requires external or real-time information, you MUST call the tool.\n\n"
-        "To call the tool, you must output ONLY a valid JSON object. Do not include markdown code fences, explanations, or any text before or after the JSON.\n"
-        "JSON Format:\n"
-        "{\"tool\": \"websearch\", \"query\": \"<search terms>\"}\n\n"
-        "Example of tool call:\n"
-        "User: What is the weather in Tokyo right now?\n"
-        "Assistant: {\"tool\": \"websearch\", \"query\": \"Tokyo weather right now\"}\n\n"
-        "If you can answer fully using your internal knowledge, reply normally with plain text. Do not use JSON.";
+        "You are an assistant that can call a tool named \"websearch\".\n"
+        "When the user asks for information you cannot know internally, you MUST output ONLY this JSON:\n"
+        "{\"tool\":\"websearch\",\"query\":\"<rewrite the user's request as a concise search query>\"}\n"
+        "You must replace the placeholder with an actual search query.\n"
+        "No text before it.\n"
+        "No text after it.\n"
+        "No explanations.\n"
+        "No commentary.\n"
+        "No blank lines.\n"
+        "If the user's request does not require external information, reply normally.";
+
 
 
        /* "You are a helpful assistant. If a query requires external info, you MUST call the websearch tool.\n"
@@ -143,27 +145,27 @@ extern "C" {
         "If you can answer using internal knowledge, reply normally without JSON.";*/
 
 
-   /* static const char* TOOL_SYSTEM_PROMPT =
-        "You are a helpful assistant.\n"
-        "\n"
-        "You have access to a tool named \"websearch\".\n"
-        "\n"
-        "When the user asks a question that requires external information, you MUST respond with a JSON object in the following exact format:\n"
-        "\n"
-        "{\"tool\":\"websearch\",\"query\":\"<the user question here>\"}\n"
-        "\n"
-        "Rules:\n"
-        "- Output ONLY the JSON object.\n"
-        "- Do NOT add explanations, commentary, or text before or after the JSON.\n"
-        "- Do NOT wrap the JSON in code fences.\n"
-        "- Do NOT change the field names \"tool\" or \"query\".\n"
-        "- Do NOT add extra fields.\n"
-        "- Do NOT answer the question yourself until AFTER the tool result is provided.\n"
-        "- If you add anything outside the JSON object, the tool call will fail.\n"
-        "\n"
-        "After the tool result is provided, you may answer normally\n"
-        "\n"
-        "If the user asks something that you can answer using your internal knowledge, answer normally without calling the tool.\n";*/
+    //static const char* TOOL_SYSTEM_PROMPT =
+    //    "You are a helpful assistant.\n"
+    //    "\n"
+    //    "You have access to a tool named \"websearch\".\n"
+    //    "\n"
+    //    "When the user asks a question that requires external information, you MUST respond with a JSON object in the following exact format:\n"
+    //    "\n"
+    //    "{\"tool\":\"websearch\",\"query\":\"<the user question here>\"}\n"
+    //    "\n"
+    //    "Rules:\n"
+    //    "- Output ONLY the JSON object.\n"
+    //    "- Do NOT add explanations, commentary, or text before or after the JSON.\n"
+    //    "- Do NOT wrap the JSON in code fences.\n"
+    //    "- Do NOT change the field names \"tool\" or \"query\".\n"
+    //    "- Do NOT add extra fields.\n"
+    //    "- Do NOT answer the question yourself until AFTER the tool result is provided.\n"
+    //    "- If you add anything outside the JSON object, the tool call will fail.\n"
+    //    "\n"
+    //    "After the tool result is provided, you may answer normally\n"
+    //    "\n"
+    //    "If the user asks something that you can answer using your internal knowledge, answer normally without calling the tool.\n";
 
    /* static const char* websearch_grammar =
         "root ::= object\n"

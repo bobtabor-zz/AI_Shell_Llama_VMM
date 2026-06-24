@@ -14,6 +14,12 @@
 
 char* g_plugin_result = NULL;
 
+typedef struct {
+    int state;
+    char buf[2048];
+    size_t len;
+} json_detector_t;
+
 
 static llama_token tokenize_single(
     const struct llama_vocab* vocab,
@@ -465,18 +471,20 @@ int engine_feed_user(engine_t* e, const char* user_text_raw) {
     return 0;
 }
 
-static char* extract_websearch_query(const char* json) {
-    const char* p = strstr(json, "\"query\":\"");
-    if (!p) return NULL;
+char* extract_websearch_query(const char* json) {
+    const char* key = "\"query\":\"";
+    const char* start = strstr(json, key);
+    if (!start) return NULL;
 
-    p += strlen("\"query\":\"");
-    const char* end = strchr(p, '"');
+    start += strlen(key);
+
+    const char* end = strchr(start, '"');
     if (!end) return NULL;
 
-    size_t len = end - p;
-    char* out = (char*)malloc(len + 1);
-    memcpy(out, p, len);
-    out[len] = 0;
+    size_t len = end - start;
+    char* out = malloc(len + 1);
+    memcpy(out, start, len);
+    out[len] = '\0';
     return out;
 }
 
@@ -499,129 +507,118 @@ int engine_generate_reply(
     llama_token eos_tok = llama_token_eos(vocab);
     llama_token eot_tok = llama_token_eot(vocab);
 
-    // 1. Allocate ONE batch and reuse it for all tokens
     struct llama_batch batch = llama_batch_init(1, 0, 1);
 
+    bool json_started = false;
+    bool json_complete = false;
+    json_detector_t jd = { 0 };
 
-    const char* TOOL_PREFIX = "{\"tool\":\"websearch\",\"query\":\"";
-
-    char toolbuf[1024] = { 0 };
-    size_t toolbuf_len = 0;
-    bool tool_json_complete = false;
-
+    jd.state = 0;
+    jd.len = 0;
+    jd.buf[0] = 0;
 
     while (n_gen < max_tokens && out_len + 8 < out_size) {
-        // 2. Sample next token from current logits
+
+        // 1. Sample next token
         llama_token tok = engine_sample_next(e);
 
-        // Hard stop: explicit EOT (if defined)
-        if (tok == eot_tok && eot_tok != -1)
-            break;
-
-        // 1. Stop on EOS
-        if (tok == eos_tok)
-            break;
-
-        // 2. Stop on control tokens (Llama‑3, Qwen, Gemma, etc.)
-        if (llama_token_is_control(vocab, tok))
-            break;
-
-        //// 3. SmolLM / Llama‑2: stop only AFTER assistant has started
-       
-        // 4. Phi‑3 / Qwen: stop if model re‑emits assistant tag after start
-        if (n_gen > 0 && e->assistant_tok != -1 && tok == e->assistant_tok)
-            break;
-
-        // 5. Phi‑3: stop after first newline once assistant has started
-        if (tok == '\n' && n_gen > 0)
-            break;
-
-        // 3. Token → text
+        // 2. Convert token → text
         char piece[256];
         int n = llama_token_to_piece(vocab, tok, piece, sizeof(piece), 0, false);
-        if (n <= 0 || out_len + (size_t)n >= out_size)
+        if (n <= 0)
             break;
 
-        // FIX: Only stop on text turn-enders AFTER the assistant has actually started typing words
-        //if (n_gen > 0) {
-            if (strstr(piece, "<|end|>") != NULL ||
-                strstr(piece, "<|assistant|>") != NULL ||
-                strstr(piece, "[/INST]") != NULL ||
-                strstr(piece, "<</SYS>>") != NULL) {
+
+        // --- JSON STATE MACHINE FEED ---
+        for (int i = 0; i < n; i++) {
+            char c = piece[i];
+
+            // append to jd buffer
+            if (jd.len < sizeof(jd.buf) - 1) {
+                jd.buf[jd.len++] = c;
+                jd.buf[jd.len] = 0;
+            }
+
+            switch (jd.state) {
+            case 0:
+                if (c == '{') jd.state = 1;
+                break;
+
+            case 1:
+                if (strstr(jd.buf, "{\"tool\":\"websearch\",\"query\":\""))
+                    jd.state = 2;
+                break;
+
+            case 2:
+                if (c == '}' && jd.len > 2 && jd.buf[jd.len - 2] == '"')
+                    json_complete = true;
                 break;
             }
-        //}
-        
-        //// Stop on double newline AFTER assistant has started
-        //    if (n_gen > 0 &&
-        //        (strstr(piece, "\n\n") || strstr(out, "\n\n")))
-        //    {
-        //        break;
-        //    }
+        }
 
-        memcpy(out + out_len, piece, n);
-        out_len += n;
-        out[out_len] = '\0';
+        // 3. Stop on EOS/EOT/control
+        if (tok == eos_tok) 
+        { 
+            break; 
+        }
+        if (tok == eot_tok && eot_tok != -1)
+        { 
+            break;
+        }
+        if (llama_token_is_control(vocab, tok))
+        { 
+            break; 
+        }
 
-        // --- accumulate into tool buffer for JSON detection ---
-        if (toolbuf_len + n < sizeof(toolbuf) - 1) {
-            memcpy(toolbuf + toolbuf_len, piece, n);
-            toolbuf_len += n;
-            toolbuf[toolbuf_len] = '\0';
+        // 4. Detect JSON start
+        if (jd.state == 2 && !json_started) {
+            json_started = true;
+            out_len = 0;
+            out[0] = '\0';
+        }
+
+        // 5. Capture JSON or normal text
+        if (json_started) {
+            if (out_len + n < out_size - 1) {
+                memcpy(out + out_len, piece, n);
+                out_len += n;
+                out[out_len] = '\0';
+            }
         }
         else {
-            // simple sliding window if overflow
-            size_t keep = sizeof(toolbuf) / 2;
-            memmove(toolbuf, toolbuf + toolbuf_len - keep, keep);
-            toolbuf_len = keep;
-            if (toolbuf_len + n < sizeof(toolbuf) - 1) {
-                memcpy(toolbuf + toolbuf_len, piece, n);
-                toolbuf_len += n;
-                toolbuf[toolbuf_len] = '\0';
+            if (out_len + n < out_size - 1) {
+                memcpy(out + out_len, piece, n);
+                out_len += n;
+                out[out_len] = '\0';
             }
         }
 
-        // --- detect complete websearch JSON ---
-        char* start = strstr(toolbuf, "{\"tool\":\"websearch\",\"query\":\"");
-        if (start) {
-            char* end = strstr(start, "\"}");
-            if (end) {
-                // full JSON detected
-                size_t json_len = (end + 2) - start;
-                char json_block[512];
-                if (json_len < sizeof(json_block)) {
-                    memcpy(json_block, start, json_len);
-                    json_block[json_len] = 0;
+        // 6. If JSON complete → call tool
+        if (json_complete) {
+            char json_block[2048];
+            strncpy(json_block, jd.buf, sizeof(json_block) - 1);
+            json_block[sizeof(json_block) - 1] = 0;
 
-                    // extract query
-                    char* query = extract_websearch_query(json_block);
-                    if (query) {
-                        char* argvv[1];
-                        argvv[0] = query;
+            char* query = extract_websearch_query(json_block);
+            if (query) {
+                char* argvv[1] = { query };
+                char* result = plugin_websearch(1, argvv);
+                free(query);
 
-                        // --- CALL THE TOOL ---
-                        char* result = plugin_websearch(1, argvv);
-
-                        // free query string
-                        free(query);
-
-                        // you now have the tool result in `result`
-                        // you can inject it into the model or return it
-                        // simplest: append to out and break
-                        if (result) {
-                            strncat(out, "\n\n[WEBSEARCH RESULT]\n", out_size - strlen(out) - 1);
-                            strncat(out, result, out_size - strlen(out) - 1);
-                            free(result);
-                        }
-
-                        break; // stop generation
-                    }
+                if (result) {
+                    snprintf(out, out_size,
+                        "%s\n\n[WEBSEARCH RESULT]\n%s",
+                        json_block, result);
+                    free(result);
                 }
+
+                llama_batch_free(batch);
+                return (int)strlen(out);
             }
         }
 
 
-        // 4. Prepare batch for next decode
+        // 8. Prepare batch for next decode
         batch.n_tokens = 1;
         batch.token[0] = tok;
         batch.pos[0] = e->pos;
@@ -629,14 +626,12 @@ int engine_generate_reply(
         batch.seq_id[0][0] = e->seq_id;
         batch.logits[0] = 1;
 
-        // 5. Decode (single call, no retry, no KV surgery)
         int rc = llama_decode(e->ctx, batch);
         if (rc != 0) {
             llama_batch_free(batch);
             return rc;
         }
 
-        // 6. Advance engine state
         e->pos++;
         e->kv_len = e->pos;
         n_gen++;
@@ -645,6 +640,8 @@ int engine_generate_reply(
     llama_batch_free(batch);
     return (int)out_len;
 }
+
+
 
 // ------------------------------------------------------------
 // HTML chat entry point - Complete Separated Plugin & UI Merge Pipeline
