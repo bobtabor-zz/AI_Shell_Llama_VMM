@@ -551,6 +551,13 @@ int engine_generate_reply(
                 break;
             }
         //}
+        
+        //// Stop on double newline AFTER assistant has started
+        //    if (n_gen > 0 &&
+        //        (strstr(piece, "\n\n") || strstr(out, "\n\n")))
+        //    {
+        //        break;
+        //    }
 
         memcpy(out + out_len, piece, n);
         out_len += n;

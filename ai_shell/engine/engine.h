@@ -126,10 +126,21 @@ extern "C" {
     );
 
     static const char* TOOL_SYSTEM_PROMPT =
-        "You are a helpful assistant. If a query requires external info, you MUST call the websearch tool.\n"
+        "You are a helpful assistant with access to a websearch tool.\n"
+        "CRITICAL: If the user's query requires external or real-time information, you MUST call the tool.\n\n"
+        "To call the tool, you must output ONLY a valid JSON object. Do not include markdown code fences, explanations, or any text before or after the JSON.\n"
+        "JSON Format:\n"
+        "{\"tool\": \"websearch\", \"query\": \"<search terms>\"}\n\n"
+        "Example of tool call:\n"
+        "User: What is the weather in Tokyo right now?\n"
+        "Assistant: {\"tool\": \"websearch\", \"query\": \"Tokyo weather right now\"}\n\n"
+        "If you can answer fully using your internal knowledge, reply normally with plain text. Do not use JSON.";
+
+
+       /* "You are a helpful assistant. If a query requires external info, you MUST call the websearch tool.\n"
         "To call it, output ONLY this raw JSON object, no code fences, no extra text:\n"
         "{\"tool\":\"websearch\",\"query\":\"<user query>\"}\n"
-        "If you can answer using internal knowledge, reply normally without JSON.";
+        "If you can answer using internal knowledge, reply normally without JSON.";*/
 
 
    /* static const char* TOOL_SYSTEM_PROMPT =
@@ -168,7 +179,26 @@ extern "C" {
         "object ::= \"{\\\"tool\\\":\\\"websearch\\\",\\\"query\\\":\\\"\" query \"\\\"}\"\n"
         "query  ::= [^\\\"]*\n";
 
+    static const char* phi3_tool_prompt =
+        "You are a helpful assistant. You have access to a websearch tool.\n"
+        "If a query requires external info, you MUST call the tool by returning a JSON object.\n"
+        "[CRITICAL RULES]\n"
+        "1. For tool calls, output ONLY the raw JSON. No markdown, no code fences, no explanations.\n"
+        "2. If you know the answer, reply normally in plain text.\n\n"
+        "[JSON SCHEMA]\n"
+        "{\"tool\": \"websearch\", \"query\": \"<optimized search keywords>\"}\n\n"
+        "[EXAMPLE]\n"
+        "User: Who won the latest Super Bowl?\n"
+        "Assistant: {\"tool\": \"websearch\", \"query\": \"latest Super Bowl winner\"}";
 
+    static const char* smollm_tool_prompt =
+        "You are an AI with a websearch tool.\n"
+        "If you need external info, reply ONLY with this JSON:\n"
+        "{\"tool\": \"websearch\", \"query\": \"search keywords\"}\n"
+        "Rules:\n"
+        "- Never use markdown code fences.\n"
+        "- Never add extra text or explanations.\n"
+        "- If you can answer without the tool, reply with normal text.";
 
 
 #ifdef __cplusplus
