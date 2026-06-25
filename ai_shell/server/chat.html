@@ -286,13 +286,16 @@
                 return `<img src="${url}" style="max-width:100%; max-height:150px; border-radius:12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin:8px 0; display:block;">`;
             });
 
+            
             // 2. FIXED: Fallback to match ANY valid web link or Wikipedia format (handles all casing variants)
             const generalUrlRegex = /(?<!=["'])(https?:\/\/[^\s<>"]+)/gi;
             html = html.replace(generalUrlRegex, url => {
-                // Trim any hanging text characters like punctuation at the very end of a sentence
-                let cleanUrl = url.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]+$/, "");
+                // Trim any hanging text characters like punctuation, plus trailing slashes and backslashes
+                let cleanUrl = url.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]+$/, "").replace(/[\\\/]+$/, "");
                 return `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer" style="color:#4ea1ff; font-weight:500; text-decoration:underline; word-break:break-all;">${cleanUrl}</a>`;
             });
+
+
 
             // 3. Convert literal server newlines into clean HTML breaks
             html = html.replace(/\n/g, "<br>");
