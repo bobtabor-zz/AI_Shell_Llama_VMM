@@ -11,14 +11,6 @@
 
 #pragma comment(lib, "winhttp.lib")
 
-//
-//struct GoogleMemory {
-//    char* data;
-//    size_t size;
-//};
-
-//#include <deps/curl/curl.h>
-
 
 // Forward declaration of DDG plugin (from ddg.c)
 extern char* plugin_ddg(int argc, char** argv);
@@ -405,15 +397,11 @@ char* plugin_websearch(int argc, char** argv) {
             }
             cJSON_Delete(wiki_json);
         }
-        
-        //char wiki_text[2048];   // writable buffer
-        //snprintf(wiki_text, sizeof(wiki_text), "%s", wiki);
-
+      
         free(wiki);
     }
 
-    // ==================== 2. OPENVERSE IMAGE SECTOR ====================
-        // ==================== 2. OPENVERSE IMAGE SECTOR ====================
+ // ==================== 2. OPENVERSE IMAGE SECTOR ====================
     if (is_image_request) {
         char* ov_data = openverse_api_images(query);
         if (ov_data) {
@@ -551,14 +539,10 @@ char* plugin_websearch(int argc, char** argv) {
 
             cJSON_Delete(ddg_json);
         }
-        //char ddg_text[2048];   // writable buffer
-        //snprintf(ddg_text, sizeof(ddg_text), "%s", ddg);
-        
-        free(ddg);
+      free(ddg);
     }
 
-
-
+    ///fprintf(stderr, "[DBG] entering JSON wrap-up\n");
 
     // ==================== WRAP UP & CACHE SHIPMENT ====================
     if (collected_any_data) {
