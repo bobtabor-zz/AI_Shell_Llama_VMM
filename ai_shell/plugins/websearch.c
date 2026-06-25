@@ -42,6 +42,7 @@ static char* http_get_utf8(const wchar_t* host, const wchar_t* path) {
         WinHttpCloseHandle(s);
         return NULL;
     }
+       
 
     HINTERNET r = WinHttpOpenRequest(
         c, L"GET", path, NULL, WINHTTP_NO_REFERER,

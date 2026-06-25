@@ -37,10 +37,9 @@ static char* ws_recv(HINTERNET ws) {
     return out;
 }
 
-// Read entire WinHTTP response into a malloc'd buffer
 static char* http_read_all(HINTERNET hRequest) {
     DWORD size = 0, downloaded = 0;
-    char* buffer = malloc(1);
+    char* buffer = (char*)malloc(1);
     size_t total = 0;
 
     do {
@@ -49,7 +48,7 @@ static char* http_read_all(HINTERNET hRequest) {
         if (size == 0)
             break;
 
-        char* chunk = malloc(size + 1);
+        char* chunk = (char*)malloc(size + 1);
         if (!WinHttpReadData(hRequest, chunk, size, &downloaded)) {
             free(chunk);
             break;
@@ -57,7 +56,7 @@ static char* http_read_all(HINTERNET hRequest) {
 
         chunk[downloaded] = 0;
 
-        buffer = realloc(buffer, total + downloaded + 1);
+        buffer = (char*)realloc(buffer, total + downloaded + 1);
         memcpy(buffer + total, chunk, downloaded);
         total += downloaded;
         buffer[total] = 0;
@@ -72,21 +71,17 @@ static char* http_read_all(HINTERNET hRequest) {
 // Connect to Chromium DevTools
 // ------------------------------------------------------------
 
-
 HINTERNET chromium_connect() {
-    // 1. Open WinHTTP session
     HINTERNET hSession = WinHttpOpen(L"ChromiumDevTools",
         WINHTTP_ACCESS_TYPE_NO_PROXY,
         NULL, NULL, 0);
     if (!hSession)
         return NULL;
 
-    // 2. Connect to localhost:9222
     HINTERNET hConnect = WinHttpConnect(hSession, L"localhost", 9222, 0);
     if (!hConnect)
         return NULL;
 
-    // 3. Request /json
     HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET",
         L"/json",
         NULL, NULL, NULL, 0);
@@ -99,14 +94,12 @@ HINTERNET chromium_connect() {
     if (!WinHttpReceiveResponse(hRequest, NULL))
         return NULL;
 
-    // 4. Read response body
     char* json = http_read_all(hRequest);
     WinHttpCloseHandle(hRequest);
 
     if (!json)
         return NULL;
 
-    // 5. Parse JSON array
     cJSON* root = cJSON_Parse(json);
     free(json);
 
@@ -115,7 +108,6 @@ HINTERNET chromium_connect() {
         return NULL;
     }
 
-    // Use the first page entry
     cJSON* first = cJSON_GetArrayItem(root, 0);
     if (!first) {
         cJSON_Delete(root);
@@ -129,28 +121,48 @@ HINTERNET chromium_connect() {
     }
 
     const char* full_ws_url = wsurl->valuestring;
-
-    // Extract the path after ws://localhost:9222
     const char* path = strstr(full_ws_url, "/devtools/");
     if (!path) {
         cJSON_Delete(root);
         return NULL;
     }
 
-    // Convert path to wide string
     wchar_t wpath[512];
     swprintf(wpath, 512, L"%hs", path);
 
     cJSON_Delete(root);
 
+    wprintf(L"CONNECTING TO PATH: %s\n", wpath);
+
     // 6. Open WebSocket upgrade request
-    HINTERNET hWSReq = WinHttpOpenRequest(hConnect, L"GET",
+    HINTERNET hWSReq = WinHttpOpenRequest(
+        hConnect,
+        L"GET",
         wpath,
-        NULL, NULL, NULL, 0);
+        NULL,
+        NULL,
+        NULL,
+        WINHTTP_FLAG_SECURE // Chrome requires secure flag even for ws://
+    );
+
     if (!hWSReq)
         return NULL;
 
-    if (!WinHttpSendRequest(hWSReq, NULL, 0, NULL, 0, 0, 0))
+    // Required WebSocket headers
+    LPCWSTR headers =
+        L"Connection: Upgrade\r\n"
+        L"Upgrade: websocket\r\n"
+        L"Sec-WebSocket-Version: 13\r\n"
+        L"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n";
+
+    if (!WinHttpSendRequest(
+        hWSReq,
+        headers,
+        (DWORD)-1L,
+        NULL,
+        0,
+        0,
+        0))
         return NULL;
 
     if (!WinHttpReceiveResponse(hWSReq, NULL))
@@ -162,6 +174,7 @@ HINTERNET chromium_connect() {
         return NULL;
 
     return hWebSocket;
+
 }
 
 // ------------------------------------------------------------
