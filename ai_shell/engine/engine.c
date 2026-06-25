@@ -91,7 +91,6 @@ void engine_init_runtime(engine_t* e) {
     e->n_turns = 0;
 }
 
-
 // ============================================================================
 // MODEL FAMILY ENUM + GLOBAL
 // ============================================================================
@@ -280,6 +279,18 @@ void engine_wrap_user(char* dst, size_t n, const char* usr) {
     }
 }
 
+const char* engine_default_system_prompt(void) {
+    switch (g_model_family) {
+    case MODEL_LLAMA3: return LLAMA3_SYSTEM_PROMPT;
+    case MODEL_SMOLLM: return SMOLLM_SYSTEM_PROMPT;
+    case MODEL_PHI3:   return PHI3_SYSTEM_PROMPT;
+    case MODEL_MISTRAL:return MISTRAL_SYSTEM_PROMPT;
+    case MODEL_QWEN:   return QWEN_SYSTEM_PROMPT;
+    case MODEL_GEMMA:  return GEMMA_SYSTEM_PROMPT;
+    case MODEL_LLAMA2: return LLAMA2_SYSTEM_PROMPT;
+    default:           return LLAMA3_SYSTEM_PROMPT;
+    }
+}
 
 // ------------------------------------------------------------
 // Simple sampler (greedy; swap with your sampler if desired)
@@ -489,6 +500,48 @@ char* extract_websearch_query(const char* json) {
 }
 
 
+
+// Note: changed bool to int for standard C compatibility unless using <stdbool.h>
+
+int repair_json(const char* input, char* output, size_t out_size) {
+    size_t len = strlen(input);
+    if (len + 4 >= out_size) return 0;
+
+    memset(output, 0, out_size);
+    memcpy(output, input, len);
+
+    // Locate the start of the JSON block
+    const char* prefix_marker = "\"tool\":\"websearch\",\"query\":\"";
+    const char* match = strstr(input, prefix_marker);
+
+    if (match != NULL) {
+        size_t search_start = match - input + strlen(prefix_marker);
+
+        // Scan forward to find how the string payload terminates
+        for (size_t i = search_start; i < len; i++) {
+
+            // Check for a literal double quote error (\"")
+            if (i <= len - 3 && input[i] == '\\' && input[i + 1] == '"' && input[i + 2] == '"') {
+                output[i + 2] = '}';
+                return 1;
+            }
+
+            // FIX: Find the regular closing quote mark of the search phrase
+            if (input[i] == '"' && input[i - 1] != '\\') {
+                // If it isn't followed immediately by a closing brace, fix it!
+                if (i + 1 >= len || output[i + 1] != '}') {
+                    // Make space by shifting the rest of the string right by 1 byte
+                    memmove(&output[i + 2], &output[i + 1], len - i);
+                    output[i + 1] = '}';
+                    return 1;
+                }
+            }
+        }
+    }
+
+    return 0;
+}
+
 int engine_generate_reply(
     engine_t* e,
     char* out,
@@ -512,10 +565,11 @@ int engine_generate_reply(
     bool json_started = false;
     bool json_complete = false;
     json_detector_t jd = { 0 };
-
+    char json_block[2048] = { 0 };
     jd.state = 0;
     jd.len = 0;
-    jd.buf[0] = 0;
+    jd.buf[0] = '\0';
+    char repaired[2048];
 
     while (n_gen < max_tokens && out_len + 8 < out_size) {
 
@@ -525,80 +579,68 @@ int engine_generate_reply(
         // 2. Convert token → text
         char piece[256];
         int n = llama_token_to_piece(vocab, tok, piece, sizeof(piece), 0, false);
-        if (n <= 0)
-            break;
+        if (n < 0) break;
+        if (n >= 0 && n < sizeof(piece)) piece[n] = '\0';
 
-
-        // --- JSON STATE MACHINE FEED ---
-        for (int i = 0; i < n; i++) {
-            char c = piece[i];
-
-            // append to jd buffer
-            if (jd.len < sizeof(jd.buf) - 1) {
-                jd.buf[jd.len++] = c;
-                jd.buf[jd.len] = 0;
+        // 3. JSON STATE MACHINE FEED (Only process if there are characters)
+        if (n > 0) {
+            for (int i = 0; i < n; i++) {
+                char c = piece[i];
+                if (jd.len < sizeof(jd.buf) - 1) {
+                    jd.buf[jd.len++] = c;
+                    jd.buf[jd.len] = 0;
+                }
+                switch (jd.state) {
+                case 0: if (c == '{') jd.state = 1; break;
+                case 1: if (strstr(jd.buf, "{\"tool\":\"websearch\",\"query\":\"")) jd.state = 2; break;
+                case 2: if (c == '}' && jd.len > 2 && jd.buf[jd.len - 2] == '"') 
+                {
+                    json_complete = true;                 
+                    break; 
+                }
+                }
             }
-
-            switch (jd.state) {
-            case 0:
-                if (c == '{') jd.state = 1;
-                break;
-
-            case 1:
-                if (strstr(jd.buf, "{\"tool\":\"websearch\",\"query\":\""))
-                    jd.state = 2;
-                break;
-
-            case 2:
-                if (c == '}' && jd.len > 2 && jd.buf[jd.len - 2] == '"')
-                    json_complete = true;
-                break;
-            }
-        }
-
-        // 3. Stop on EOS/EOT/control
-        if (tok == eos_tok) 
-        { 
-            break; 
-        }
-        if (tok == eot_tok && eot_tok != -1)
-        { 
-            break;
-        }
-        if (llama_token_is_control(vocab, tok))
-        { 
-            break; 
         }
 
         // 4. Detect JSON start
-        if (jd.state == 2 && !json_started) {
+        if (jd.state == 2 && !json_started)
+        {
             json_started = true;
             out_len = 0;
             out[0] = '\0';
         }
 
+        if (jd.state == 2)
+        { 
+            bool fixed = repair_json(jd.buf, repaired, sizeof(repaired));
+            if (fixed) {
+                json_complete = true;
+                strncpy(json_block, repaired, sizeof(json_block) - 1);
+                json_block[sizeof(json_block) - 1] = 0;
+            }
+            else 
+            {     
+                if (json_complete) 
+                {
+                    strncpy(json_block, jd.buf, sizeof(json_block) - 1);
+                    json_block[sizeof(json_block) - 1] = 0;
+                }
+            }
+        }
+
         // 5. Capture JSON or normal text
-        if (json_started) {
-            if (out_len + n < out_size - 1) {
-                memcpy(out + out_len, piece, n);
-                out_len += n;
-                out[out_len] = '\0';
-            }
-        }
-        else {
-            if (out_len + n < out_size - 1) {
-                memcpy(out + out_len, piece, n);
-                out_len += n;
-                out[out_len] = '\0';
-            }
+        if (out_len + n < out_size - 1) {
+            memcpy(out + out_len, piece, n);
+            out_len += n;
+            out[out_len] = '\0';
         }
 
-        // 6. If JSON complete → call tool
+        // =====================================================================
+        // RUN STEP 6 HERE FIRST: Check if JSON is complete BEFORE checking EOT!
+        // =====================================================================
         if (json_complete) {
-            char json_block[2048];
-            strncpy(json_block, jd.buf, sizeof(json_block) - 1);
-            json_block[sizeof(json_block) - 1] = 0;
-
+           /* strncpy(json_block, repaired, sizeof(json_block) - 1);
+            json_block[sizeof(json_block) - 1] = 0;*/
             char* query = extract_websearch_query(json_block);
             if (query) {
                 char* argvv[1] = { query };
@@ -606,19 +648,30 @@ int engine_generate_reply(
                 free(query);
 
                 if (result) {
-                    snprintf(out, out_size,
-                        "%s\n\n[WEBSEARCH RESULT]\n%s",
-                        json_block, result);
+                    snprintf(out, out_size, "%s\n\n[WEBSEARCH RESULT]\n%s", json_block, result);
                     free(result);
                 }
 
+                // Clean up structures completely
+                jd.state = 0;
+                jd.len = 0;
+                jd.buf[0] = 0;
+                json_started = false;
+                json_complete = false;
+                memset(json_block, 0, sizeof(json_block));
                 llama_batch_free(batch);
-                return (int)strlen(out);
+                return (int)strlen(out); // Exits cleanly with the search results!
             }
         }
 
+        // =====================================================================
+        // NOW IT IS SAFE TO BREAK: If no tool was called, handle control tokens
+        // =====================================================================
+        if (tok == eos_tok) break;
+        if (tok == eot_tok && eot_tok != -1) break;
+        if (llama_token_is_control(vocab, tok)) break;
 
-        // 8. Prepare batch for next decode
+        // 8. Prepare batch for next decode (unchanged)        
         batch.n_tokens = 1;
         batch.token[0] = tok;
         batch.pos[0] = e->pos;
@@ -780,7 +833,7 @@ int engine_chat_html(
     }
     model_reply[0] = '\0';
 
-    int rc = engine_generate_reply(e, model_reply, out_size, 256);
+    int rc = engine_generate_reply(e, model_reply, out_size, 512);
     if (rc < 0) {
         free(model_reply);
         if (plugin_executed && Plugin_result) free(Plugin_result);
@@ -844,8 +897,9 @@ void engine_reset(engine_t* e) {
     e->html_n_turns = 0;
     e->n_turns = 0;
 
+    const char* sys_prompt = engine_default_system_prompt();
     //engine_feed_system_prompt(e, "You are a helpful assistant.");
-    engine_feed_system_prompt(e, TOOL_SYSTEM_PROMPT);
+    engine_feed_system_prompt(e, sys_prompt);
 
 }
 
@@ -887,9 +941,7 @@ engine_t* engine_open(const char* model_path) {
 
     const struct llama_vocab* vocab = llama_model_get_vocab(e->model);
     
-    // Phi‑3 / Qwen
-    e->assistant_tok = tokenize_single(vocab, "<|assistant|>");
-
+    
     // 3. Create context
     struct llama_context_params cparams = llama_context_default_params();
 
@@ -950,14 +1002,10 @@ engine_t* engine_open(const char* model_path) {
         return NULL;
     }
 
-    /*if (engine_feed_system_prompt(e, "You are a helpful assistant.") != 0) {
-        llama_free(e->ctx);
-        llama_free_model(e->model);
-        free(e);
-        return NULL;
-    }*/
-
-    if (engine_feed_system_prompt(e, TOOL_SYSTEM_PROMPT) != 0) {
+    const char* sys_prompt = engine_default_system_prompt();
+    //printf("[engine] system prompt =\n%s\n", sys_prompt);
+    
+    if (engine_feed_system_prompt(e, sys_prompt) != 0) {
         llama_free(e->ctx);
         llama_free_model(e->model);
         free(e);
