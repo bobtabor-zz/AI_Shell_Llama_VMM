@@ -128,7 +128,7 @@ extern "C" {
     static const char* TOOL_SYSTEM_PROMPT =
         "You are an assistant that can call a tool named \"websearch\".\n"
         "When the user asks for information you cannot know internally, you MUST output ONLY this JSON:\n"
-        "{\"tool\":\"websearch\",\"query\":\"<rewrite the user's request as a concise search query>\"}\n"
+        "{\"tool\":\"websearch\",\"query\":\"search_query\"}\n"
         "You must replace the placeholder with an actual search query.\n"
         "No text before it.\n"
         "No text after it.\n"
@@ -188,7 +188,7 @@ extern "C" {
         "1. For tool calls, output ONLY the raw JSON. No markdown, no code fences, no explanations.\n"
         "2. If you know the answer, reply normally in plain text.\n\n"
         "[JSON SCHEMA]\n"
-        "{\"tool\": \"websearch\", \"query\": \"<optimized search keywords>\"}\n\n"
+        "{\"tool\": \"websearch\", \"query\": \"optimized search keywords\"}\n\n"
         "[EXAMPLE]\n"
         "User: Who won the latest Super Bowl?\n"
         "Assistant: {\"tool\": \"websearch\", \"query\": \"latest Super Bowl winner\"}";

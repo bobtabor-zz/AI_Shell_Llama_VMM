@@ -489,6 +489,48 @@ char* extract_websearch_query(const char* json) {
 }
 
 
+
+// Note: changed bool to int for standard C compatibility unless using <stdbool.h>
+
+int repair_json(const char* input, char* output, size_t out_size) {
+    size_t len = strlen(input);
+    if (len + 4 >= out_size) return 0;
+
+    memset(output, 0, out_size);
+    memcpy(output, input, len);
+
+    // Locate the start of the JSON block
+    const char* prefix_marker = "\"tool\":\"websearch\",\"query\":\"";
+    const char* match = strstr(input, prefix_marker);
+
+    if (match != NULL) {
+        size_t search_start = match - input + strlen(prefix_marker);
+
+        // Scan forward to find how the string payload terminates
+        for (size_t i = search_start; i < len; i++) {
+
+            // Check for a literal double quote error (\"")
+            if (i <= len - 3 && input[i] == '\\' && input[i + 1] == '"' && input[i + 2] == '"') {
+                output[i + 2] = '}';
+                return 1;
+            }
+
+            // FIX: Find the regular closing quote mark of the search phrase
+            if (input[i] == '"' && input[i - 1] != '\\') {
+                // If it isn't followed immediately by a closing brace, fix it!
+                if (i + 1 >= len || output[i + 1] != '}') {
+                    // Make space by shifting the rest of the string right by 1 byte
+                    memmove(&output[i + 2], &output[i + 1], len - i);
+                    output[i + 1] = '}';
+                    return 1;
+                }
+            }
+        }
+    }
+
+    return 0;
+}
+
 int engine_generate_reply(
     engine_t* e,
     char* out,
@@ -516,6 +558,7 @@ int engine_generate_reply(
     jd.state = 0;
     jd.len = 0;
     jd.buf[0] = '\0';
+    char repaired[2048];
 
     while (n_gen < max_tokens && out_len + 8 < out_size) {
 
@@ -539,16 +582,39 @@ int engine_generate_reply(
                 switch (jd.state) {
                 case 0: if (c == '{') jd.state = 1; break;
                 case 1: if (strstr(jd.buf, "{\"tool\":\"websearch\",\"query\":\"")) jd.state = 2; break;
-                case 2: if (c == '}' && jd.len > 2 && jd.buf[jd.len - 2] == '"') json_complete = true; break;
+                case 2: if (c == '}' && jd.len > 2 && jd.buf[jd.len - 2] == '"') 
+                {
+                    json_complete = true;                 
+                    break; 
+                }
                 }
             }
         }
 
         // 4. Detect JSON start
-        if (jd.state == 2 && !json_started) {
+        if (jd.state == 2 && !json_started)
+        {
             json_started = true;
             out_len = 0;
             out[0] = '\0';
+        }
+
+        if (jd.state == 2)
+        { 
+            bool fixed = repair_json(jd.buf, repaired, sizeof(repaired));
+            if (fixed) {
+                json_complete = true;
+                strncpy(json_block, repaired, sizeof(json_block) - 1);
+                json_block[sizeof(json_block) - 1] = 0;
+            }
+            else 
+            {     
+                if (json_complete) 
+                {
+                    strncpy(json_block, jd.buf, sizeof(json_block) - 1);
+                    json_block[sizeof(json_block) - 1] = 0;
+                }
+            }
         }
 
         // 5. Capture JSON or normal text
@@ -562,8 +628,8 @@ int engine_generate_reply(
         // RUN STEP 6 HERE FIRST: Check if JSON is complete BEFORE checking EOT!
         // =====================================================================
         if (json_complete) {
-            strncpy(json_block, jd.buf, sizeof(json_block) - 1);
-            json_block[sizeof(json_block) - 1] = 0;
+           /* strncpy(json_block, repaired, sizeof(json_block) - 1);
+            json_block[sizeof(json_block) - 1] = 0;*/
             char* query = extract_websearch_query(json_block);
             if (query) {
                 char* argvv[1] = { query };
