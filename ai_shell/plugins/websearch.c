@@ -413,7 +413,7 @@ char* plugin_websearch(int argc, char** argv) {
     }
 
     // ==================== 2. OPENVERSE IMAGE SECTOR ====================
-        // ==================== 2. OPENVERSE IMAGE SECTOR ====================
+     
     if (is_image_request) {
         char* ov_data = openverse_api_images(query);
         if (ov_data) {
@@ -557,6 +557,106 @@ char* plugin_websearch(int argc, char** argv) {
         free(ddg);
     }
 
+    // ==================== 4. BRAVE SEARCH SECTOR ====================
+  
+    //
+    //char* brave = plugin_brave(argc, argv);
+    //if (brave) {
+    //    cJSON* brave_json = cJSON_Parse(brave);
+    //    if (brave_json) {
+    //        collected_any_data = true;
+
+    //        // Brave Search nests web results inside a "web" object under a "results" array
+    //        cJSON* web_root = cJSON_GetObjectItemCaseSensitive(brave_json, "web");
+    //        cJSON* web_results = web_root ? cJSON_GetObjectItemCaseSensitive(web_root, "results") : NULL;
+
+    //        if (web_results && cJSON_IsArray(web_results)) {
+    //            cJSON* element = NULL;
+    //            cJSON_ArrayForEach(element, web_results) {
+    //                // Brave uses standard "title", "description" (snippet), and "url"
+    //                cJSON* title_item = cJSON_GetObjectItemCaseSensitive(element, "title");
+    //                cJSON* snippet_item = cJSON_GetObjectItemCaseSensitive(element, "description");
+    //                cJSON* url_item = cJSON_GetObjectItemCaseSensitive(element, "url");
+
+    //                if (title_item && cJSON_IsString(title_item)) {
+    //                    // Brave's API is paid and clean, but keeping the protection safety block
+    //                    if (url_item && url_item->valuestring) {
+    //                        if (strstr(url_item->valuestring, "aclick") != NULL ||
+    //                            strstr(url_item->valuestring, "ad_") != NULL) {
+    //                            continue;
+    //                        }
+    //                    }
+
+    //                    cJSON* item = cJSON_CreateObject();
+    //                    cJSON_AddStringToObject(item, "source", "Brave");
+
+    //                    char combined[1024] = { 0 };
+    //                    snprintf(combined, sizeof(combined), "%s - %s",
+    //                        title_item->valuestring,
+    //                        (snippet_item && snippet_item->valuestring) ? snippet_item->valuestring : "");
+
+    //                    cJSON_AddStringToObject(item, "title", combined);
+    //                    if (url_item && url_item->valuestring) {
+    //                        cJSON_AddStringToObject(item, "url", url_item->valuestring);
+    //                    }
+    //                    cJSON_AddItemToArray(master_results, item);
+    //                }
+    //            }
+    //        }
+
+    //        cJSON_Delete(brave_json);
+    //    }
+
+    //    free(brave);
+    //}
+
+    // ==================== 5. CHROMIUM SEARCH SECTOR ====================
+
+    char* chromium = plugin_chromium(argc, argv);
+    if (chromium) {
+
+        printf("\n================ RAW CHROMIUM OUTPUT ================\n%s\n\n", chromium);
+
+        cJSON* chromium_json = cJSON_Parse(chromium);
+        if (chromium_json) {
+            collected_any_data = true;
+
+            // We expect: { "type": "chromium_html", "html": "<!doctype html>..." }
+            cJSON* type_item = cJSON_GetObjectItemCaseSensitive(chromium_json, "type");
+            cJSON* html_item = cJSON_GetObjectItemCaseSensitive(chromium_json, "html");
+
+            printf("TYPE: %s\n", type_item ? type_item->valuestring : "NULL");
+            printf("HTML: %s\n", html_item ? html_item->valuestring : "NULL");
+
+
+            if (type_item && cJSON_IsString(type_item) &&
+                html_item && cJSON_IsString(html_item) &&
+                strcmp(type_item->valuestring, "chromium_html") == 0) {
+
+                // Create a single synthetic result from the HTML snapshot
+                cJSON* item = cJSON_CreateObject();
+                cJSON_AddStringToObject(item, "source", "Chromium");
+
+                // You can improve this later by parsing <title> etc.
+                cJSON_AddStringToObject(item, "title", "Chromium HTML snapshot");
+
+                char full_url[2048];
+                snprintf(full_url, sizeof(full_url),
+                    "https://search.brave.com/search?q=%s", query);
+                cJSON_AddStringToObject(item, "url", full_url);
+
+                
+                //cJSON_AddStringToObject(item, "url", "https://search.brave.com/search");
+                cJSON_AddStringToObject(item, "snippet", html_item->valuestring);
+
+                cJSON_AddItemToArray(master_results, item);
+            }
+
+            cJSON_Delete(chromium_json);
+        }
+
+        free(chromium);
+    }
 
 
 
