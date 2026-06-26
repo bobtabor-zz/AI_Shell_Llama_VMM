@@ -616,18 +616,18 @@ char* plugin_websearch(int argc, char** argv) {
     char* chromium = plugin_chromium(argc, argv);
     if (chromium) {
 
-        printf("\n================ RAW CHROMIUM OUTPUT ================\n%s\n\n", chromium);
+       /* printf("\n================ RAW CHROMIUM OUTPUT ================\n%s\n\n", chromium);*/
 
         cJSON* chromium_json = cJSON_Parse(chromium);
         if (chromium_json) {
             collected_any_data = true;
 
             // We expect: { "type": "chromium_html", "html": "<!doctype html>..." }
-            cJSON* type_item = cJSON_GetObjectItemCaseSensitive(chromium_json, "type");
-            cJSON* html_item = cJSON_GetObjectItemCaseSensitive(chromium_json, "html");
+           cJSON* type_item = cJSON_GetObjectItemCaseSensitive(chromium_json, "type");
+           cJSON* html_item = cJSON_GetObjectItemCaseSensitive(chromium_json, "html");
 
-            printf("TYPE: %s\n", type_item ? type_item->valuestring : "NULL");
-            printf("HTML: %s\n", html_item ? html_item->valuestring : "NULL");
+         //   printf("TYPE: %s\n", type_item ? type_item->valuestring : "NULL");
+         //   printf("HTML: %s\n", html_item ? html_item->valuestring : "NULL");
 
 
             if (type_item && cJSON_IsString(type_item) &&
@@ -642,8 +642,8 @@ char* plugin_websearch(int argc, char** argv) {
                 cJSON_AddStringToObject(item, "title", "Chromium HTML snapshot");
 
                 char full_url[2048];
-                snprintf(full_url, sizeof(full_url),
-                    "https://search.brave.com/search?q=%s", query);
+                //snprintf(full_url, sizeof(full_url),"https://search.brave.com/search?q=%s", query);
+                snprintf(full_url, sizeof(full_url), "https://search.google.com/search?q=%s", query);
                 cJSON_AddStringToObject(item, "url", full_url);
 
                 

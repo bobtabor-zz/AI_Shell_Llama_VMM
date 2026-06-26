@@ -32,11 +32,11 @@ static BOOL ws_send(HINTERNET ws, const char* msg) {
 // Receive complete WebSocket message into malloc'd buffer (Handles Fragments)
 // ------------------------------------------------------------
 static char* ws_recv(HINTERNET ws) {
-    BYTE buf[4096];
+    BYTE buf[16384]; /* Increased to 16KB per read frame slice to handle large HTML trees */
     DWORD len = 0;
     WINHTTP_WEB_SOCKET_BUFFER_TYPE type;
     char* out = NULL;
-    size_t total_allocated = 8192;
+    size_t total_allocated = 65536; /* Start allocation window at 64KB */
     size_t total_received = 0;
 
     out = (char*)malloc(total_allocated);
@@ -49,7 +49,7 @@ static char* ws_recv(HINTERNET ws) {
             return NULL;
         }
 
-        if (total_received + len >= total_allocated) {
+        while (total_received + len >= total_allocated) {
             total_allocated *= 2;
             char* temp = (char*)realloc(out, total_allocated);
             if (!temp) {
@@ -119,11 +119,6 @@ HINTERNET chromium_connect(void) {
     const char* path = NULL;
     wchar_t wpath[512];
 
-    LPCWSTR headers = L"Connection: Upgrade\r\n"
-        L"Upgrade: websocket\r\n"
-        L"Sec-WebSocket-Version: 13\r\n"
-        L"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n";
-
     hSession = WinHttpOpen(L"ChromiumDevTools", WINHTTP_ACCESS_TYPE_NO_PROXY, NULL, NULL, 0);
     if (!hSession) return NULL;
 
@@ -181,7 +176,7 @@ HINTERNET chromium_connect(void) {
         goto cleanup_wsreq;
     }
 
-    if (!WinHttpSendRequest(hWSReq, headers, (DWORD)-1L, NULL, 0, 0, 0)) goto cleanup_wsreq;
+    if (!WinHttpSendRequest(hWSReq, NULL, 0, NULL, 0, 0, 0)) goto cleanup_wsreq;
     if (!WinHttpReceiveResponse(hWSReq, NULL)) goto cleanup_wsreq;
 
     hWebSocket = WinHttpWebSocketCompleteUpgrade(hWSReq, NULL);
@@ -225,8 +220,7 @@ static void brave_json_escape(char* dst, size_t dst_sz, const char* src) {
 char* plugin_chromium(int argc, char** argv) {
     if (argc < 1) return _strdup("{\"error\":\"no query\"}");
 
-    /* FIX 1: Array buffer bound explicitly defined */
-    char query[1024] = { 0 };
+    char query[2048] = { 0 };
     for (int i = 0; i < argc; i++) {
         strcat_s(query, sizeof(query), argv[i]);
         if (i + 1 < argc) strcat_s(query, sizeof(query), " ");
@@ -239,23 +233,21 @@ char* plugin_chromium(int argc, char** argv) {
     ws_send(ws, "{\"id\":1,\"method\":\"Page.enable\"}");
     free(ws_recv(ws));
 
-    /* 2. Dispatched isolated custom page navigation script */
+    /* Target Google Search securely via navigation format layout */
     char nav[2048];
-    snprintf(nav, sizeof(nav), "{\"id\":2,\"method\":\"Page.navigate\",\"params\":{\"url\":\"https://brave.com\"}}", query);
+    snprintf(nav, sizeof(nav), "{\"id\":2,\"method\":\"Page.navigate\",\"params\":{\"url\":\"https://google.com\"}}", query);
     ws_send(ws, nav);
 
-    /* Drain the immediate navigation response frame confirmation */
+    /* Drain the navigation confirm message packet frame */
     char* nav_confirm = ws_recv(ws);
     if (nav_confirm) free(nav_confirm);
 
-    /* 3. Event tracking routine: Poll Chromium until the body element or results containers populate */
+    /* Await result presence containers or safety timeout step */
     int retries = 0;
     int page_is_ready = 0;
-
-    while (retries < 50) { /* 5 second max safety ceiling timeout threshold */
-        /* Check if search result container nodes or generic content blocks exist yet */
+    while (retries < 50) {
         ws_send(ws, "{\"id\":99,\"method\":\"Runtime.evaluate\",\"params\":{"
-            "\"expression\":\"document.querySelector('#results, #main, body') !== null\","
+            "\"expression\":\"document.querySelector('#search, #main, body') !== null\","
             "\"returnByValue\":true}}");
 
         char* poll_resp = ws_recv(ws);
@@ -274,20 +266,35 @@ char* plugin_chromium(int argc, char** argv) {
             free(poll_resp);
         }
 
-        if (page_is_ready) {
-            break;
-        }
-
-        Sleep(100); /* Halt thread execution context slice for 100ms before re-checking */
+        if (page_is_ready) break;
+        Sleep(100);
         retries++;
     }
 
-    /* 4. Evaluate with returnByValue true to dump layout content safely */
+    /* 4. Evaluate document out to isolated inner payload string buffer */
     ws_send(ws, "{\"id\":4,\"method\":\"Runtime.evaluate\","
         "\"params\":{\"expression\":\"document.documentElement.outerHTML\",\"returnByValue\":true}}");
 
+    /* CRITICAL FIX: Loop until we receive the packet matching our command transaction (id: 4) */
+    char* resp = NULL;
+    while (1) {
+        char* raw_msg = ws_recv(ws);
+        if (!raw_msg) break;
 
-    char* resp = ws_recv(ws);
+        cJSON* check_root = cJSON_Parse(raw_msg);
+        if (check_root) {
+            cJSON* id_item = cJSON_GetObjectItem(check_root, "id");
+            /* Check if this message is the direct response to our HTML fetch command */
+            if (id_item && cJSON_IsNumber(id_item) && id_item->valueint == 4) {
+                resp = raw_msg; /* Found it! */
+                cJSON_Delete(check_root);
+                break;
+            }
+            cJSON_Delete(check_root);
+        }
+        free(raw_msg); /* Discard background/lifecycle event packets */
+    }
+
     WinHttpWebSocketClose(ws, 0, NULL, 0);
 
     if (!resp) return _strdup("{\"error\":\"chromium_no_response\"}");
@@ -324,3 +331,5 @@ char* plugin_chromium(int argc, char** argv) {
     cJSON_Delete(root);
     return out;
 }
+
+
