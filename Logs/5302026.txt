@@ -17,14 +17,27 @@ model_generate default "Hello"
 http://127.0.0.1:8081/infer
 
 OPEN_MODEL default C:\Projects\AI_Shell-main\Meta-Llama-3-8B-Instruct.Q4_K_S.gguf
-
 OPEN_MODEL default C:\Projects\AI_Shell-main\Bob-llama-Q4_K_S.gguf
 
 
-OPEN default C:\Projects\AI_Shell-main\Bob-llama-Q4_K_S.gguf
+chat I want to see pictures of cats.
+OPEN default C:\Projects\AI_Shell-main\Meta-Llama-3-8B-Instruct-Q2_K.gguf
 
+OPEN default C:\Projects\AI_Shell-main\Phi-3-mini-4k-instruct-q4.gguf
+
+OPEN default C:\Projects\AI_Shell-main\Bob-llama-3-Q4_K_S.gguf
+
+OPEN default C:\Projects\AI_Shell-main\smollm-1.7b-instruct-q4_k_m.gguf
+
+
+
+file:\\\C:\Users\btabor\source\ai_shell\server\chat.html
+
+file:\\\C:\Users\Bobio\source\ai_shell\server\chat.html
 
 ..\llama.cpp\ggml\include
+
+
 
 
 MODEL_TEST default "Hello"
@@ -96,3 +109,8 @@ AI_SHELL Chat ΓÇö type 'exit' to quit
 You: hello
 AI: {"output":"[gguf] model 'default' loaded: 291 tensors; prompt=''"}
 You:
+
+
+
+
+ version 20.19+ or 22.12+. Please upgrade your Node.js version.

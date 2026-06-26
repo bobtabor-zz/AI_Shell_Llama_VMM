@@ -46,5 +46,15 @@ If you want, I can also help you:
 
 Just say the word.
 
+"ws://localhost:9222/devtools/page/1356CAA3C6FB14586706DC5D917B7300"
+wscat -c ws://localhost:9222/devtools/page/1356CAA3C6FB14586706DC5D917B7300 <<< fails in power shell
 
 
+test in cmd:
+
+curl -v ^
+More?   -H "Connection: Upgrade" ^
+More?   -H "Upgrade: websocket" ^
+More?   -H "Sec-WebSocket-Version: 13" ^
+More?   -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" ^
+More?   http://localhost:9222/devtools/page/1356CAA3C6FB14586706DC5D917B7300
