@@ -278,7 +278,8 @@
             const div = document.createElement("div");
             div.className = `msg ${role}`;
 
-            let html = text;
+            // FIX 1: Clean raw JSON escape strings (like \" and \\) BEFORE running regex looks
+            let html = text.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
 
             // 1. Process images safely first (ignoring existing tags)
             const imgRegex = /(?<!=["'])(https?:\/\/[^\s<>"]+\.(?:jpg|jpeg|png|gif|webp))/gi;
@@ -286,20 +287,23 @@
                 return `<img src="${url}" style="max-width:100%; max-height:150px; border-radius:12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin:8px 0; display:block;">`;
             });
 
-            
-            // 2. FIXED: Fallback to match ANY valid web link or Wikipedia format (handles all casing variants)
-            const generalUrlRegex = /(?<!=["'])(https?:\/\/[^\s<>"]+)/gi;
+            // 2. FIX 2: Updated Regex to catch URLs that contain literal spaces within query values
+            const generalUrlRegex = /(?<!=["'])(https?:\/\/[^\s<>"]+(?:\s[^\s<>"]+)*)/gi;
+
             html = html.replace(generalUrlRegex, url => {
-                // Trim any hanging text characters like punctuation, plus trailing slashes and backslashes
-                let cleanUrl = url.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]+$/, "").replace(/[\\\/]+$/, "");
-                return `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer" style="color:#4ea1ff; font-weight:500; text-decoration:underline; word-break:break-all;">${cleanUrl}</a>`;
+                let cleanUrl = url.trim();
+
+                // Remove trailing punctuation marks safely without destroying URL content strings
+                cleanUrl = cleanUrl.replace(/[.,#!$%\^&\*;:{}=\-_`~()]+$/, "");
+
+                // Convert any loose spaces inside the URL query string into safe browser "%20" tokens
+                const encodedUrl = cleanUrl.replace(/ /g, "%20");
+
+                return `<a href="${encodedUrl}" target="_blank" rel="noopener noreferrer" style="color:#4ea1ff; font-weight:500; text-decoration:underline; word-break:break-all;">${cleanUrl}</a>`;
             });
-
-
 
             // 3. Convert literal server newlines into clean HTML breaks
             html = html.replace(/\n/g, "<br>");
-
             div.innerHTML = html;
 
             const chat = document.getElementById("chat");
@@ -308,6 +312,7 @@
                 chat.scrollTop = chat.scrollHeight;
             }
         }
+
 
 
 
