@@ -1,3 +1,10 @@
+#ifndef WINVER
+#define WINVER 0x0602 /* Target Windows 8+ */
+#endif
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0602 /* Target Windows 8+ */
+#endif
+
 // plugin_chromium.c — Chromium DevTools search backend
 #include <windows.h>
 #include <winhttp.h>
@@ -7,33 +14,60 @@
 #include "../include/plugin.h"
 #include "cJSON.h"
 
+/* Manually define the macro if winhttp.h omitted it */
+#ifndef WINHTTP_OPTION_UPGRADE_TO_WEBSOCKET
+#define WINHTTP_OPTION_UPGRADE_TO_WEBSOCKET 114
+#endif
+
 #pragma comment(lib, "winhttp.lib")
 
 // ------------------------------------------------------------
 // Send a WebSocket message
 // ------------------------------------------------------------
 static BOOL ws_send(HINTERNET ws, const char* msg) {
-    return WinHttpWebSocketSend(ws,
-        WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE,
-        (BYTE*)msg,
-        (DWORD)strlen(msg)
-    ) == ERROR_SUCCESS;
+    return WinHttpWebSocketSend(ws, WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE, (BYTE*)msg, (DWORD)strlen(msg)) == ERROR_SUCCESS;
 }
 
 // ------------------------------------------------------------
-// Receive WebSocket message into malloc'd buffer
+// Receive complete WebSocket message into malloc'd buffer (Handles Fragments)
 // ------------------------------------------------------------
 static char* ws_recv(HINTERNET ws) {
     BYTE buf[4096];
     DWORD len = 0;
     WINHTTP_WEB_SOCKET_BUFFER_TYPE type;
+    char* out = NULL;
+    size_t total_allocated = 8192;
+    size_t total_received = 0;
 
-    if (WinHttpWebSocketReceive(ws, buf, sizeof(buf), &len, &type) != ERROR_SUCCESS)
-        return NULL;
+    out = (char*)malloc(total_allocated);
+    if (!out) return NULL;
+    out[0] = '\0';
 
-    char* out = malloc(len + 1);
-    memcpy(out, buf, len);
-    out[len] = 0;
+    do {
+        if (WinHttpWebSocketReceive(ws, buf, sizeof(buf), &len, &type) != ERROR_SUCCESS) {
+            free(out);
+            return NULL;
+        }
+
+        if (total_received + len >= total_allocated) {
+            total_allocated *= 2;
+            char* temp = (char*)realloc(out, total_allocated);
+            if (!temp) {
+                free(out);
+                return NULL;
+            }
+            out = temp;
+        }
+
+        if (len > 0) {
+            memcpy(out + total_received, buf, len);
+            total_received += len;
+        }
+        out[total_received] = '\0';
+
+    } while (type == WINHTTP_WEB_SOCKET_UTF8_FRAGMENT_BUFFER_TYPE ||
+        type == WINHTTP_WEB_SOCKET_BINARY_FRAGMENT_BUFFER_TYPE);
+
     return out;
 }
 
@@ -41,145 +75,132 @@ static char* http_read_all(HINTERNET hRequest) {
     DWORD size = 0, downloaded = 0;
     char* buffer = (char*)malloc(1);
     size_t total = 0;
+    if (!buffer) return NULL;
+    buffer[0] = '\0';
 
     do {
-        if (!WinHttpQueryDataAvailable(hRequest, &size))
-            break;
-        if (size == 0)
-            break;
-
+        if (!WinHttpQueryDataAvailable(hRequest, &size)) break;
+        if (size == 0) break;
         char* chunk = (char*)malloc(size + 1);
+        if (!chunk) break;
         if (!WinHttpReadData(hRequest, chunk, size, &downloaded)) {
             free(chunk);
             break;
         }
-
         chunk[downloaded] = 0;
-
-        buffer = (char*)realloc(buffer, total + downloaded + 1);
+        char* temp = (char*)realloc(buffer, total + downloaded + 1);
+        if (!temp) {
+            free(chunk);
+            break;
+        }
+        buffer = temp;
         memcpy(buffer + total, chunk, downloaded);
         total += downloaded;
         buffer[total] = 0;
-
         free(chunk);
     } while (size > 0);
-
     return buffer;
 }
 
 // ------------------------------------------------------------
 // Connect to Chromium DevTools
 // ------------------------------------------------------------
-
-HINTERNET chromium_connect() {
-    HINTERNET hSession = WinHttpOpen(L"ChromiumDevTools",
-        WINHTTP_ACCESS_TYPE_NO_PROXY,
-        NULL, NULL, 0);
-    if (!hSession)
-        return NULL;
-
-    HINTERNET hConnect = WinHttpConnect(hSession, L"localhost", 9222, 0);
-    if (!hConnect)
-        return NULL;
-
-    HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET",
-        L"/json",
-        NULL, NULL, NULL, 0);
-    if (!hRequest)
-        return NULL;
-
-    if (!WinHttpSendRequest(hRequest, NULL, 0, NULL, 0, 0, 0))
-        return NULL;
-
-    if (!WinHttpReceiveResponse(hRequest, NULL))
-        return NULL;
-
-    char* json = http_read_all(hRequest);
-    WinHttpCloseHandle(hRequest);
-
-    if (!json)
-        return NULL;
-
-    cJSON* root = cJSON_Parse(json);
-    free(json);
-
-    if (!root || !cJSON_IsArray(root)) {
-        cJSON_Delete(root);
-        return NULL;
-    }
-
-    cJSON* first = cJSON_GetArrayItem(root, 0);
-    if (!first) {
-        cJSON_Delete(root);
-        return NULL;
-    }
-
-    cJSON* wsurl = cJSON_GetObjectItem(first, "webSocketDebuggerUrl");
-    if (!wsurl || !cJSON_IsString(wsurl)) {
-        cJSON_Delete(root);
-        return NULL;
-    }
-
-    const char* full_ws_url = wsurl->valuestring;
-    const char* path = strstr(full_ws_url, "/devtools/");
-    if (!path) {
-        cJSON_Delete(root);
-        return NULL;
-    }
-
+HINTERNET chromium_connect(void) {
+    HINTERNET hSession = NULL;
+    HINTERNET hConnect = NULL;
+    HINTERNET hRequest = NULL;
+    HINTERNET hWSReq = NULL;
+    HINTERNET hWebSocket = NULL;
+    char* json = NULL;
+    cJSON* root = NULL;
+    cJSON* first = NULL;
+    cJSON* wsurl = NULL;
+    const char* full_ws_url = NULL;
+    const char* path = NULL;
     wchar_t wpath[512];
-    swprintf(wpath, 512, L"%hs", path);
 
-    cJSON_Delete(root);
-
-    wprintf(L"CONNECTING TO PATH: %s\n", wpath);
-
-    // 6. Open WebSocket upgrade request
-    HINTERNET hWSReq = WinHttpOpenRequest(
-        hConnect,
-        L"GET",
-        wpath,
-        NULL,
-        NULL,
-        NULL,
-        WINHTTP_FLAG_SECURE // Chrome requires secure flag even for ws://
-    );
-
-    if (!hWSReq)
-        return NULL;
-
-    // Required WebSocket headers
-    LPCWSTR headers =
-        L"Connection: Upgrade\r\n"
+    LPCWSTR headers = L"Connection: Upgrade\r\n"
         L"Upgrade: websocket\r\n"
         L"Sec-WebSocket-Version: 13\r\n"
         L"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n";
 
-    if (!WinHttpSendRequest(
-        hWSReq,
-        headers,
-        (DWORD)-1L,
-        NULL,
-        0,
-        0,
-        0))
-        return NULL;
+    hSession = WinHttpOpen(L"ChromiumDevTools", WINHTTP_ACCESS_TYPE_NO_PROXY, NULL, NULL, 0);
+    if (!hSession) return NULL;
 
-    if (!WinHttpReceiveResponse(hWSReq, NULL))
+    hConnect = WinHttpConnect(hSession, L"localhost", 9222, 0);
+    if (!hConnect) {
+        WinHttpCloseHandle(hSession);
         return NULL;
+    }
 
-    // 7. Upgrade to WebSocket
-    HINTERNET hWebSocket = WinHttpWebSocketCompleteUpgrade(hWSReq, NULL);
-    if (!hWebSocket)
-        return NULL;
+    hRequest = WinHttpOpenRequest(hConnect, L"GET", L"/json", NULL, NULL, NULL, 0);
+    if (!hRequest) goto cleanup_connect;
+
+    if (!WinHttpSendRequest(hRequest, NULL, 0, NULL, 0, 0, 0)) goto cleanup_request;
+    if (!WinHttpReceiveResponse(hRequest, NULL)) goto cleanup_request;
+
+    json = http_read_all(hRequest);
+    WinHttpCloseHandle(hRequest);
+    hRequest = NULL;
+
+    if (!json) goto cleanup_connect;
+
+    root = cJSON_Parse(json);
+    free(json);
+    if (!root || !cJSON_IsArray(root)) {
+        cJSON_Delete(root);
+        goto cleanup_connect;
+    }
+
+    first = cJSON_GetArrayItem(root, 0);
+    if (!first) {
+        cJSON_Delete(root);
+        goto cleanup_connect;
+    }
+
+    wsurl = cJSON_GetObjectItem(first, "webSocketDebuggerUrl");
+    if (!wsurl || !cJSON_IsString(wsurl)) {
+        cJSON_Delete(root);
+        goto cleanup_connect;
+    }
+
+    full_ws_url = wsurl->valuestring;
+    path = strstr(full_ws_url, "/devtools/");
+    if (!path) {
+        cJSON_Delete(root);
+        goto cleanup_connect;
+    }
+
+    swprintf(wpath, 512, L"%hs", path);
+    cJSON_Delete(root);
+
+    hWSReq = WinHttpOpenRequest(hConnect, L"GET", wpath, NULL, NULL, NULL, 0);
+    if (!hWSReq) goto cleanup_connect;
+
+    if (!WinHttpSetOption(hWSReq, WINHTTP_OPTION_UPGRADE_TO_WEBSOCKET, NULL, 0)) {
+        goto cleanup_wsreq;
+    }
+
+    if (!WinHttpSendRequest(hWSReq, headers, (DWORD)-1L, NULL, 0, 0, 0)) goto cleanup_wsreq;
+    if (!WinHttpReceiveResponse(hWSReq, NULL)) goto cleanup_wsreq;
+
+    hWebSocket = WinHttpWebSocketCompleteUpgrade(hWSReq, NULL);
+    WinHttpCloseHandle(hWSReq);
+
+    if (!hWebSocket) goto cleanup_connect;
 
     return hWebSocket;
 
+cleanup_wsreq:
+    WinHttpCloseHandle(hWSReq);
+cleanup_request:
+    if (hRequest) WinHttpCloseHandle(hRequest);
+cleanup_connect:
+    WinHttpCloseHandle(hConnect);
+    WinHttpCloseHandle(hSession);
+    return NULL;
 }
 
-// ------------------------------------------------------------
-// JSON escape (copied from plugin_brave.c)
-// ------------------------------------------------------------
 static void brave_json_escape(char* dst, size_t dst_sz, const char* src) {
     size_t di = 0;
     for (size_t i = 0; src[i] && di + 2 < dst_sz; i++) {
@@ -198,58 +219,82 @@ static void brave_json_escape(char* dst, size_t dst_sz, const char* src) {
     dst[di] = 0;
 }
 
-
 // ------------------------------------------------------------
 // MAIN PLUGIN FUNCTION
 // ------------------------------------------------------------
 char* plugin_chromium(int argc, char** argv) {
-    if (argc < 1)
-        return _strdup("{\"error\":\"no query\"}");
+    if (argc < 1) return _strdup("{\"error\":\"no query\"}");
 
-    // Build query string
+    /* FIX 1: Array buffer bound explicitly defined */
     char query[1024] = { 0 };
     for (int i = 0; i < argc; i++) {
-        strcat(query, argv[i]);
-        if (i + 1 < argc) strcat(query, " ");
+        strcat_s(query, sizeof(query), argv[i]);
+        if (i + 1 < argc) strcat_s(query, sizeof(query), " ");
     }
 
-    // Connect to Chromium
     HINTERNET ws = chromium_connect();
-    if (!ws)
-        return _strdup("{\"error\":\"chromium_connect_failed\"}");
+    if (!ws) return _strdup("{\"error\":\"chromium_connect_failed\"}");
 
-    // Enable Page domain
+    /* Enable Page notifications */
     ws_send(ws, "{\"id\":1,\"method\":\"Page.enable\"}");
     free(ws_recv(ws));
 
-    // Navigate
+    /* 2. Dispatched isolated custom page navigation script */
     char nav[2048];
-    snprintf(nav, sizeof(nav),
-        "{\"id\":2,\"method\":\"Page.navigate\",\"params\":{\"url\":\"https://search.brave.com/search?q=%s\"}}",
-        query
-    );
+    snprintf(nav, sizeof(nav), "{\"id\":2,\"method\":\"Page.navigate\",\"params\":{\"url\":\"https://brave.com\"}}", query);
     ws_send(ws, nav);
-    free(ws_recv(ws));
 
-    // Evaluate JS to get HTML
-    ws_send(ws,
-        "{\"id\":4,\"method\":\"Runtime.evaluate\","
-        "\"params\":{\"expression\":\"document.documentElement.outerHTML\"}}"
-    );
+    /* Drain the immediate navigation response frame confirmation */
+    char* nav_confirm = ws_recv(ws);
+    if (nav_confirm) free(nav_confirm);
+
+    /* 3. Event tracking routine: Poll Chromium until the body element or results containers populate */
+    int retries = 0;
+    int page_is_ready = 0;
+
+    while (retries < 50) { /* 5 second max safety ceiling timeout threshold */
+        /* Check if search result container nodes or generic content blocks exist yet */
+        ws_send(ws, "{\"id\":99,\"method\":\"Runtime.evaluate\",\"params\":{"
+            "\"expression\":\"document.querySelector('#results, #main, body') !== null\","
+            "\"returnByValue\":true}}");
+
+        char* poll_resp = ws_recv(ws);
+        if (poll_resp) {
+            cJSON* poll_root = cJSON_Parse(poll_resp);
+            if (poll_root) {
+                cJSON* p_res = cJSON_GetObjectItem(poll_root, "result");
+                cJSON* p_inn = p_res ? cJSON_GetObjectItem(p_res, "result") : NULL;
+                cJSON* p_val = p_inn ? cJSON_GetObjectItem(p_inn, "value") : NULL;
+
+                if (p_val && cJSON_IsTrue(p_val)) {
+                    page_is_ready = 1;
+                }
+                cJSON_Delete(poll_root);
+            }
+            free(poll_resp);
+        }
+
+        if (page_is_ready) {
+            break;
+        }
+
+        Sleep(100); /* Halt thread execution context slice for 100ms before re-checking */
+        retries++;
+    }
+
+    /* 4. Evaluate with returnByValue true to dump layout content safely */
+    ws_send(ws, "{\"id\":4,\"method\":\"Runtime.evaluate\","
+        "\"params\":{\"expression\":\"document.documentElement.outerHTML\",\"returnByValue\":true}}");
+
 
     char* resp = ws_recv(ws);
-
     WinHttpWebSocketClose(ws, 0, NULL, 0);
 
-    if (!resp)
-        return _strdup("{\"error\":\"chromium_no_response\"}");
+    if (!resp) return _strdup("{\"error\":\"chromium_no_response\"}");
 
-    // Parse DevTools JSON
     cJSON* root = cJSON_Parse(resp);
     free(resp);
-
-    if (!root)
-        return _strdup("{\"error\":\"chromium_bad_json\"}");
+    if (!root) return _strdup("{\"error\":\"chromium_bad_json\"}");
 
     cJSON* result = cJSON_GetObjectItem(root, "result");
     cJSON* inner = result ? cJSON_GetObjectItem(result, "result") : NULL;
@@ -261,27 +306,21 @@ char* plugin_chromium(int argc, char** argv) {
     }
 
     const char* html = value->valuestring;
-
-    // Escape HTML
     size_t max = strlen(html) * 2 + 1;
-    char* esc = malloc(max);
+    char* esc = (char*)malloc(max);
+    if (!esc) {
+        cJSON_Delete(root);
+        return _strdup("{\"error\":\"out_of_memory\"}");
+    }
     brave_json_escape(esc, max, html);
 
-    // Build final JSON
     size_t out_len = strlen(esc) + 128;
-    char* out = malloc(out_len);
-
-    snprintf(out, out_len,
-        "{"
-        "\"type\":\"chromium_html\","
-        "\"html\":\"%s\""
-        "}",
-        esc
-    );
+    char* out = (char*)malloc(out_len);
+    if (out) {
+        snprintf(out, out_len, "{\"type\":\"chromium_html\",\"html\":\"%s\"}", esc);
+    }
 
     free(esc);
     cJSON_Delete(root);
-
     return out;
-
 }
