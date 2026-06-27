@@ -23,6 +23,62 @@
 // Forward declaration of DDG plugin (from ddg.c)
 extern char* plugin_ddg(int argc, char** argv);
 
+// Extract readable text from HTML (no tags, no scripts, no CSS)
+static char* extract_text_from_html(const char* html) {
+    size_t len = strlen(html);
+    char* out = malloc(len + 1);
+    if (!out) return NULL;
+
+    int o = 0;
+    bool in_tag = false;
+    bool skip_block = false;
+
+    for (size_t i = 0; i < len; i++) {
+        char c = html[i];
+
+        if (!skip_block &&
+            (_strnicmp(&html[i], "<script", 7) == 0 ||
+                _strnicmp(&html[i], "<style", 6) == 0 ||
+                _strnicmp(&html[i], "<noscript", 9) == 0 ||
+                _strnicmp(&html[i], "<svg", 4) == 0 ||
+                _strnicmp(&html[i], "<meta", 5) == 0 ||
+                _strnicmp(&html[i], "<link", 5) == 0 ||
+                _strnicmp(&html[i], "<header", 7) == 0 ||
+                _strnicmp(&html[i], "<footer", 7) == 0 ||
+                _strnicmp(&html[i], "<nav", 4) == 0)) {
+            skip_block = true;
+        }
+
+        if (skip_block &&
+            (_strnicmp(&html[i], "</script>", 9) == 0 ||
+                _strnicmp(&html[i], "</style>", 8) == 0 ||
+                _strnicmp(&html[i], "</noscript>", 11) == 0 ||
+                _strnicmp(&html[i], "</svg>", 6) == 0 ||
+                _strnicmp(&html[i], "</header>", 9) == 0 ||
+                _strnicmp(&html[i], "</footer>", 9) == 0 ||
+                _strnicmp(&html[i], "</nav>", 6) == 0)) {
+            skip_block = false;
+            continue;
+        }
+
+        if (skip_block) continue;
+
+        if (c == '<') { in_tag = true; continue; }
+        if (c == '>') { in_tag = false; continue; }
+        if (in_tag) continue;
+
+        if (c == '\n' || c == '\r') continue;
+        if (c == '\t') c = ' ';
+
+        out[o++] = c;
+    }
+
+    out[o] = '\0';
+    return out;
+}
+
+
+
 // ------------------------------------------------------------
 // Simple HTTP GET (UTF-8)
 // ------------------------------------------------------------
@@ -629,29 +685,32 @@ char* plugin_websearch(int argc, char** argv) {
          //   printf("TYPE: %s\n", type_item ? type_item->valuestring : "NULL");
          //   printf("HTML: %s\n", html_item ? html_item->valuestring : "NULL");
 
+           if (type_item && cJSON_IsString(type_item) &&
+               html_item && cJSON_IsString(html_item) &&
+               strcmp(type_item->valuestring, "chromium_html") == 0) {
 
-            if (type_item && cJSON_IsString(type_item) &&
-                html_item && cJSON_IsString(html_item) &&
-                strcmp(type_item->valuestring, "chromium_html") == 0) {
+               cJSON* item = cJSON_CreateObject();
+               cJSON_AddStringToObject(item, "source", "Chromium");
+               cJSON_AddStringToObject(item, "title", "Chromium HTML snapshot");
 
-                // Create a single synthetic result from the HTML snapshot
-                cJSON* item = cJSON_CreateObject();
-                cJSON_AddStringToObject(item, "source", "Chromium");
+               char full_url[2048];
+               snprintf(full_url, sizeof(full_url),
+                   "https://www.google.com/search?q=%s", query);
+               cJSON_AddStringToObject(item, "url", full_url);
 
-                // You can improve this later by parsing <title> etc.
-                cJSON_AddStringToObject(item, "title", "Chromium HTML snapshot");
+               // CLEAN THE HTML
+               char* clean = extract_text_from_html(html_item->valuestring);
+               if (clean) {
+                   cJSON_AddStringToObject(item, "snippet", clean);
+                   free(clean);
+               }
+               else {
+                   cJSON_AddStringToObject(item, "snippet", "No readable text extracted.");
+               }
 
-                char full_url[2048];
-                //snprintf(full_url, sizeof(full_url),"https://search.brave.com/search?q=%s", query);
-                snprintf(full_url, sizeof(full_url), "https://search.google.com/search?q=%s", query);
-                cJSON_AddStringToObject(item, "url", full_url);
+               cJSON_AddItemToArray(master_results, item);
+           }
 
-                
-                //cJSON_AddStringToObject(item, "url", "https://search.brave.com/search");
-                cJSON_AddStringToObject(item, "snippet", html_item->valuestring);
-
-                cJSON_AddItemToArray(master_results, item);
-            }
 
             cJSON_Delete(chromium_json);
         }
