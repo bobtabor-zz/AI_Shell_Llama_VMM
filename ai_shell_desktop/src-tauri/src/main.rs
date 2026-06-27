@@ -4,7 +4,8 @@ use once_cell::sync::Lazy;
 use std::sync::Mutex;
 use std::process::{Command, Stdio, Child, ChildStdin}; // 1. Added ChildStdin
 use std::io::{Write, BufRead, BufReader};
-use tauri::{Emitter, AppHandle};
+///use ::{Emitter, AppHandle}; // ⭐ Import Emitter to send events
+use tauri::{AppHandle, Emitter};
 use std::os::windows::process::CommandExt; 
 
 struct EngineProcess {
