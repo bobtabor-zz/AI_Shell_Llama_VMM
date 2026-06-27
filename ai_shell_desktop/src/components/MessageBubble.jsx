@@ -8,37 +8,96 @@ export default function MessageBubble({ role, content }) {
 
         const trimmed = rawContent.trim();
 
-        // Check if the incoming message is a raw server JSON payload object string
+      
+        // Helper: remove all Chromium garbage safely without dropping actual content
+        const clean = (text) => {
+            if (!text) return "";
+            return text
+                // 1. Strip raw HTML code blocks completely
+                .replace(/<style[\s\S]*?<\/style>/gi, "")
+                .replace(/<script[\s\S]*?<\/script>/gi, "")
+                .replace(/<svg[\s\S]*?<\/svg>/gi, "")
+                .replace(/<\/?[^>]+(>|$)/g, "")
+
+                // 2. TARGET CHROME JUNK: Nuke /style, /script, /svg even when glued to words (e.g., /scriptGoogle -> Google)
+                // This keeps safe words like "wiki" and "ddc" perfectly fine because it strictly checks for tag names.
+                .replace(/\/?\b(style|script|svg)(?=[A-Z\s]|$)/gi, "")
+                .replace(/\/?\b(style|script|svg)\b/gi, "")
+
+                // 3. Sweep any accidental leftover duplicate slashes
+                .replace(/\s+\/\s+/g, " ")
+
+                // 4. Compact the spacing back to a clean readable sentence
+                .replace(/\s+/g, " ")
+                .trim();
+        };
+
+
         if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
             try {
                 const parsed = JSON.parse(trimmed);
                 let markdownString = "";
 
-                if (parsed.query) markdownString += `### 🔍 Search: "${parsed.query}"\n\n`;
-                if (parsed.message) markdownString += `*${parsed.message}*\n\n`;
+                // Clean top-level fields
+                const cleanQuery = clean(parsed.query);
+                const cleanMessage = clean(parsed.message);
+                const cleanSnippet = clean(parsed.snippet);
+                const cleanTitle = clean(parsed.title);
 
+                // Search header
+                if (cleanQuery) markdownString += `### 🔍 Search: "${cleanQuery}"\n\n`;
+                if (cleanMessage) markdownString += `*${cleanMessage}*\n\n`;
+                if (cleanTitle && cleanTitle !== "Chromium HTML snapshot") {
+                    markdownString += `## ${cleanTitle}\n\n`;
+                }
+
+                // Clean snippet
+                if (cleanSnippet) {
+                    markdownString += `${cleanSnippet}\n\n`;
+                }
+
+                // Top-level URL
+                if (parsed.url) {
+                    // Encodes spaces as %20 so Markdown can parse it as a real, clickable link
+                    markdownString += `[View Web Link](${encodeURI(parsed.url)})\n\n`;
+                }
+
+
+                // ChatGPT-style cards
                 if (parsed.results && Array.isArray(parsed.results)) {
                     parsed.results.forEach((item, index) => {
-                        const associatedImg = parsed.images && parsed.images[index];
+                        const img = parsed.images?.[index] || null;
 
-                        // FIX: We pass a single image syntax block, but clean up inner quotes
-                        if (associatedImg) {
-                            const safeTitle = (item.title || "")
-                                .replace(/"/g, "'")
-                                .replace(/[\n\r]+/g, " ");
+                        const cleanItemTitle = clean(item.title);
+                        const cleanItemSnippet = clean(item.snippet);
 
-                            // We render a standard custom markdown image element block
-                            markdownString += `![${item.source || "Image"}](${associatedImg} "${safeTitle}")\n\n`;
-                        } else if (item.title) {
-                            // Fallback text rendering ONLY if there is no image block for this index slot
-                            markdownString += `**Source (${item.source || "Web"}):** ${item.title}\n\n`;
-                            if (item.url) {
-                                markdownString += `[View Web Link](${item.url})\n\n`;
-                            }
-                            markdownString += `---\n\n`;
+                        // Title
+                        if (cleanItemTitle) {
+                            markdownString += `## ${cleanItemTitle}\n\n`;
                         }
+
+                        // Image
+                        if (img) {
+                            const safeTitle = cleanItemTitle.replace(/"/g, "'");
+                            markdownString += `![Image](${img} "${safeTitle}")\n\n`;
+                        }
+
+                        // Snippet
+                        if (cleanItemSnippet) {
+                            markdownString += `${cleanItemSnippet}\n\n`;
+                        }
+
+                        // URL
+                        if (item.url) {
+                            // Encodes search query spaces inside individual search result items too
+                            markdownString += `[View Web Link](${encodeURI(item.url)})\n\n`;
+                        }
+
+
+                        markdownString += `---\n\n`;
                     });
                 }
+
                 return markdownString;
             } catch (e) {
                 return rawContent;
@@ -47,6 +106,8 @@ export default function MessageBubble({ role, content }) {
 
         return rawContent;
     };
+
+
 
     const displayMarkdown = parseContent(content);
 
@@ -115,63 +176,52 @@ const styles = {
         clear: 'both',
         boxSizing: 'border-box'
     },
+    urlContainer: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        margin: '6px 0',
+        padding: '6px 12px',
+        backgroundColor: '#e0f2fe', // Soft modern blue highlight background
+        border: '1px solid #bae6fd',
+        borderRadius: '6px',
+    },
+    urlLabel: {
+        fontWeight: 'bold',
+        color: '#0369a1',
+        marginRight: '6px',
+        fontSize: '13px',
+    },
+    highlightedUrl: {
+        color: '#0252c5',          // High-visibility deep blue link text
+        textDecoration: 'underline',
+        fontWeight: '600',
+        fontSize: '14px',
+    },
     card: {
         backgroundColor: '#ffffff',
         border: '1px solid #e1e8ed',
         borderRadius: '10px',
         overflow: 'hidden',
-        display: 'block',            // Forces each card container onto its own line
-        width: '100%',
-        maxWidth: '480px',           // Keeps the card compact on larger screens
-        margin: '16px 0',            // Provides clear spacing between stacked items
-        boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-        boxSizing: 'border-box'
-    },
-    imgLink: {
         display: 'block',
         width: '100%',
-        backgroundColor: '#f8f9fa'
+        maxWidth: '480px',
+        marginTop: '12px',
+        marginBottom: '12px'
     },
     cardImg: {
-        width: '100%',               // Forces scaling down to fit the container bounds
-        maxWidth: '100%',            // Prevents spilling off the edge of mobile screens
-        height: 'auto',              // Preserves the image's original aspect ratio
-        maxHeight: '280px',          // Restricts overly tall vertical images
-        objectFit: 'contain',        // Ensures the whole photo is visible without cropping
+        width: '100%',
+        height: 'auto',
+        display: 'block'
+    },
+    imgLink: {
         display: 'block'
     },
     cardTitle: {
-        padding: '12px 16px',
-        fontSize: '0.88rem',
-        color: '#2c3e50',
+        padding: '10px',
+        fontSize: '13px',
+        color: '#333',
         borderTop: '1px solid #e1e8ed',
-        backgroundColor: '#f8f9fa',
-        lineHeight: '1.5',
-        overflow: 'visible',         // Allows descriptions to wrap fully
-        whiteSpace: 'normal',        // Prevents truncation dots from cutting text off
-        wordBreak: 'break-word'
-    },
-    urlContainer: {
-        display: 'block',            // Forces links onto their own rows
-        backgroundColor: '#fdf6e2',
-        border: '1px solid #f5e6c4',
-        padding: '8px 12px',
-        borderRadius: '6px',
-        margin: '8px 0',
-        maxWidth: '480px',
-        wordBreak: 'break-all'
-    },
-    urlLabel: {
-        fontSize: '0.65rem',
-        fontWeight: 'bold',
-        color: '#b58900',
-        marginRight: '6px',
-        textTransform: 'uppercase'
-    },
-    highlightedUrl: {
-        color: '#dd4b39',
-        fontSize: '0.85rem',
-        fontWeight: '600',
-        textDecoration: "underline"
+        backgroundColor: '#f8f9fa'
     }
 };
+
