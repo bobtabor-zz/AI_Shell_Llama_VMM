@@ -331,5 +331,3 @@ char* plugin_chromium(int argc, char** argv) {
     cJSON_Delete(root);
     return out;
 }
-
-
