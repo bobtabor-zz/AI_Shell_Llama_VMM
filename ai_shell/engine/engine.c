@@ -96,6 +96,9 @@ void engine_init_runtime(engine_t* e) {
 // ============================================================================
 typedef enum {
     MODEL_LLAMA3,
+    MODEL_LLAMA3_WEB,
+    MODEL_HERMES2_WEB,
+    MODEL_HERMES2_PRO,
     MODEL_PHI3,
     MODEL_SMOLLM,
     MODEL_MISTRAL,
@@ -107,42 +110,82 @@ typedef enum {
 
 model_family_t g_model_family = MODEL_UNKNOWN;
 
-
-// ============================================================================
-// MODEL FAMILY DETECTOR (llama.cpp metadata + filename fallback)
-// ============================================================================
 static model_family_t detect_model_family(const char* path, struct llama_model* model) {
-    const char* arch = NULL;
+    // ---- GGUF metadata detection ----
+    char arch_buf[128] = { 0 };
 
-    // ---- Filename fallback ----
-    char lower[4096];
-    snprintf(lower, sizeof(lower), "%s", path);
-    for (char* p = lower; *p; ++p) *p = (char)tolower(*p);
+    int32_t result = llama_model_meta_val_str(model, "general.architecture",
+        arch_buf, sizeof(arch_buf));
+    char a[128];
 
-    if (arch) {
-        if (strcmp(arch, "llama3") == 0) return MODEL_LLAMA3;
-        if (strcmp(arch, "phi3") == 0) return MODEL_PHI3;
-        if (strcmp(arch, "smollm") == 0) return MODEL_SMOLLM;
-        if (strcmp(arch, "mistral") == 0) return MODEL_MISTRAL;
-        if (strcmp(arch, "qwen2") == 0 || strcmp(arch, "qwen") == 0) return MODEL_QWEN;
-        if (strcmp(arch, "gemma") == 0) return MODEL_GEMMA;
-        if (strcmp(arch, "llama") == 0) return MODEL_LLAMA2;
+    if (result > 0 && arch_buf[0] != '\0') {
+        
+        snprintf(a, sizeof(a), "%s", arch_buf);
+
+        // Convert to lowercase for easier comparison
+        for (char* p = a; *p; ++p) {
+            *p = (char)tolower(*p);
+        }
+
+  //      if (strcmp(a, "llama3") == 0) return MODEL_LLAMA3;
+		//if (strcmp(a, "llama") == 0) return MODEL_LLAMA3;  /// Llama‑3 is sometimes just "llama" in GGUF
+  //      if (strcmp(a, "phi3") == 0) return MODEL_PHI3;
+  //      if (strcmp(a, "smollm") == 0) return MODEL_SMOLLM;
+  //      if (strcmp(a, "mistral") == 0) return MODEL_MISTRAL;
+  //      if (strcmp(a, "qwen2") == 0 || strcmp(a, "qwen") == 0)
+  //          return MODEL_QWEN;
+  //      if (strcmp(a, "gemma") == 0) return MODEL_GEMMA;
+
+        // Optional: add more architectures here
     }
+        
+      // ---- 2. Filename Fallback (Secondary check) ----
+    if (strcmp(a, "llama") == 0) {
 
-    // ---- Filename fallback ----
-    char lower2[4096];
-    snprintf(lower2, sizeof(lower2), "%s", path);
-    for (char* p = lower2; *p; ++p) *p = (char)tolower(*p);
+        char lower2[4096];
+        snprintf(lower2, sizeof(lower2), "%s", path);
+        for (char* p = lower2; *p; ++p) *p = (char)tolower(*p);
 
-    if (strstr(lower2, "llama-3") || strstr(lower2, "llama3")) return MODEL_LLAMA3;
-    if (strstr(lower2, "phi-3") || strstr(lower2, "phi3"))   return MODEL_PHI3;
-    if (strstr(lower2, "smollm"))                             return MODEL_SMOLLM;
-    if (strstr(lower2, "mistral"))                            return MODEL_MISTRAL;
-    if (strstr(lower2, "qwen"))                               return MODEL_QWEN;
-    if (strstr(lower2, "gemma"))                              return MODEL_GEMMA;
-    if (strstr(lower2, "llama-2") || strstr(lower2 , "llama2")) return MODEL_LLAMA2;
+        /*if (strstr(lower2, "hermes-2-pro") && strstr(lower2, "web")) {
+            return MODEL_HERMES2_WEB;
+        }*/
 
-    return MODEL_UNKNOWN;
+        if (strstr(lower2, "hermes-2-pro-llama-3")) {
+            return MODEL_HERMES2_PRO;
+        }    
+
+        // Llama‑3‑Web detection (must come BEFORE generic llama3)
+        if (strstr(lower2, "llama-3-8b-web") ||
+            strstr(lower2, "llama3-8b-web") ||
+            strstr(lower2, "web")) {
+            return MODEL_LLAMA3_WEB;
+        }
+
+        // Generic Llama‑3
+        if (strstr(lower2, "llama-3") || strstr(lower2, "llama3"))
+            return MODEL_LLAMA3;
+
+        if (strstr(lower2, "phi-3") || strstr(lower2, "phi3"))
+            return MODEL_PHI3;
+
+        if (strstr(lower2, "smollm"))
+            return MODEL_SMOLLM;
+
+        if (strstr(lower2, "mistral"))
+            return MODEL_MISTRAL;
+
+        if (strstr(lower2, "qwen"))
+            return MODEL_QWEN;
+
+        if (strstr(lower2, "gemma"))
+            return MODEL_GEMMA;
+
+        if (strstr(lower2, "llama-2") || strstr(lower2, "llama2"))
+            return MODEL_LLAMA2;
+
+        return MODEL_UNKNOWN;
+
+    }
 }
 
 
@@ -167,6 +210,54 @@ static void wrap_llama3_user(char* dst, size_t n, const char* usr) {
         usr
     );
 }
+
+// ---- Llama‑3 web if i can find it----
+static void wrap_llama3_web_system(char* dst, size_t n, const char* sys) {
+    snprintf(dst, n,
+        "[MODE: JSON_BROWSER_AGENT]\n%s\n",
+        sys
+    ); 
+}
+
+static void wrap_llama3_web_user(char* dst, size_t n, const char* usr) {    
+    snprintf(dst, n, "user(\"%s\")\n", usr);
+}
+
+// ---- hermes2_web ----
+
+static void wrap_hermes2_web_system(char* dst, size_t n, const char* sys) {
+    snprintf(dst, n, "%s", sys);
+}
+
+
+static void wrap_hermes2_web_user(char* dst, size_t n, const char* usr) {
+    snprintf(dst, n, "%s", usr);
+}
+
+
+// ---- Hermes-2-Pro-Llama-3-8B ----
+static void wrap_hermes2_pro_system(char* dst, size_t n, const char* sys) {
+    snprintf(dst, n,
+        "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+        "%s<|eot_id|>\n",
+        sys);
+}
+
+static void wrap_hermes2_pro_user(char* dst, size_t n, const char* usr) {
+    snprintf(dst, n,
+        "<|start_header_id|>user<|end_header_id|>\n\n"
+        "%s<|eot_id|>\n"
+        "<|start_header_id|>assistant<|end_header_id|>\n\n",   // ready for generation
+        usr);
+}
+
+// Optional: for adding previous assistant replies to history
+static void wrap_hermes2_pro_assistant(char* dst, size_t n, const char* asst) {
+    snprintf(dst, n,
+        "%s<|eot_id|>\n",   // just close previous assistant turn
+        asst);
+}
+
 
 // ---- Phi‑3 ----
 static void wrap_phi3_system(char* dst, size_t n, const char* sys) {
@@ -255,6 +346,9 @@ static void wrap_llama2_user(char* dst, size_t n, const char* usr) {
 // ============================================================================
 void engine_wrap_system(char* dst, size_t n, const char* sys) {
     switch (g_model_family) {
+    case MODEL_HERMES2_PRO: wrap_hermes2_pro_system(dst, n, sys); break;
+    case MODEL_HERMES2_WEB: wrap_hermes2_web_system(dst, n, sys); break;
+    case MODEL_LLAMA3_WEB: wrap_llama3_web_system(dst, n, sys); break;
     case MODEL_LLAMA3:  wrap_llama3_system(dst, n, sys); break;
     case MODEL_PHI3:    wrap_phi3_system(dst, n, sys); break;
     case MODEL_SMOLLM:  wrap_smollm_system(dst, n, sys); break;
@@ -268,6 +362,9 @@ void engine_wrap_system(char* dst, size_t n, const char* sys) {
 
 void engine_wrap_user(char* dst, size_t n, const char* usr) {
     switch (g_model_family) {
+    case MODEL_HERMES2_PRO: wrap_hermes2_pro_user(dst, n, usr); break;
+    case MODEL_HERMES2_WEB: wrap_hermes2_web_user(dst, n, usr); break;
+    case MODEL_LLAMA3_WEB: wrap_llama3_web_user(dst, n, usr); break;
     case MODEL_LLAMA3:  wrap_llama3_user(dst, n, usr); break;
     case MODEL_PHI3:    wrap_phi3_user(dst, n, usr); break;
     case MODEL_SMOLLM:  wrap_smollm_user(dst, n, usr); break;
@@ -281,6 +378,9 @@ void engine_wrap_user(char* dst, size_t n, const char* usr) {
 
 const char* engine_default_system_prompt(void) {
     switch (g_model_family) {
+    case MODEL_HERMES2_PRO: return HERMES2_PRO_SYSTEM_PROMPT;
+    case MODEL_HERMES2_WEB: return HERMES2_WEB_SYSTEM_PROMPT;
+    case MODEL_LLAMA3_WEB: return LLAMA3_WEB_SYSTEM_PROMPT;
     case MODEL_LLAMA3: return LLAMA3_SYSTEM_PROMPT;
     case MODEL_SMOLLM: return SMOLLM_SYSTEM_PROMPT;
     case MODEL_PHI3:   return PHI3_SYSTEM_PROMPT;
@@ -323,6 +423,8 @@ int engine_feed_system_prompt(engine_t* e, const char* system_text) {
 
     char buf[4096];
     engine_wrap_system(buf, sizeof(buf), system_text);
+
+    fprintf(stderr, "\n=== SYSTEM WRAPPER OUTPUT in engine_feed_system_prompt===\n%s\n", buf);
 
     llama_token tokens[1024];
     int n_tokens = llama_tokenize(
@@ -381,67 +483,35 @@ int engine_feed_system_prompt(engine_t* e, const char* system_text) {
     return 0;
 }
 
-
-
-// ------------------------------------------------------------
-// Feed user message (templated) incrementally - STABLE NATIVE BATCH
-// ------------------------------------------------------------
-
-int engine_feed_user(engine_t* e, const char* user_text_raw) {
-    if (!e || !e->model || !e->ctx || !user_text_raw) return -1;
+int engine_feed_system(engine_t* e, const char* system_text_raw) {
+    if (!e || !e->model || !e->ctx || !system_text_raw)
+        return -1;
 
     const struct llama_vocab* vocab = llama_model_get_vocab(e->model);
 
-    // 1. Calculate length and dynamically allocate the wrapped buffer string
-    size_t raw_len = strlen(user_text_raw);
-    size_t wrapped_size = raw_len + 4096;
-    char* wrapped = (char*)malloc(wrapped_size);
-    if (!wrapped) return -1;
+    char buf[4096];
+    engine_wrap_system(buf, sizeof(buf), system_text_raw);
 
-    engine_wrap_user(wrapped, wrapped_size, user_text_raw);
+    llama_token tokens[2048];
+    int n_tokens = llama_tokenize(
+        vocab,
+        buf,
+        (int32_t)strlen(buf),
+        tokens,
+        2048,
+        false,
+        true
+    );
+    if (n_tokens <= 0) return -1;
 
-    // 2. Perform a dry-run token count request
-    int n_tokens = llama_tokenize(vocab, wrapped, (int32_t)strlen(wrapped), NULL, 0, false, true);
-    if (n_tokens < 0) n_tokens = -n_tokens;
-    if (n_tokens <= 0 || n_tokens > 2048) { // Security bounds checking safety check
-        free(wrapped);
-        return -1;
-    }
+    struct llama_batch batch = { 0 };
 
-    // 3. Dynamically allocate a clean array for token identifiers
-    llama_token* tokens = (llama_token*)malloc(sizeof(llama_token) * n_tokens);
-    if (!tokens) {
-        free(wrapped);
-        return -1;
-    }
+    llama_pos      pos_arr[2048];
+    int32_t        n_seq_arr[2048];
+    llama_seq_id   seq_id_arr[2048];
+    llama_seq_id* seq_ptr_arr[2048];
+    int8_t         logits_arr[2048];
 
-    int actual_tokens = llama_tokenize(vocab, wrapped, (int32_t)strlen(wrapped), tokens, n_tokens, false, true);
-    free(wrapped);
-    if (actual_tokens <= 0) {
-        free(tokens);
-        return -1;
-    }
-
-    // =========================================================================
-    // FIX: STACK ALLOCATE THE ARRAYS TO ELIMINATE LLAMA_BATCH_FREE() COMPLETELY
-    // =========================================================================
-    struct llama_batch batch = (struct llama_batch){ 0 };
-
-    // Dynamically size these stack arrays using Visual Studio VLA or standard local buffers
-    // 2048 provides an immense safety ceiling for common incoming user turns
-    #define USER_FEED_MAX_TOKENS 2048
-    if (actual_tokens > USER_FEED_MAX_TOKENS) {
-        free(tokens);
-        return -1;
-    }
-
-    llama_pos      pos_arr[USER_FEED_MAX_TOKENS];
-    int32_t        n_seq_arr[USER_FEED_MAX_TOKENS];
-    llama_seq_id   seq_id_arr[USER_FEED_MAX_TOKENS];
-    llama_seq_id* seq_ptr_arr[USER_FEED_MAX_TOKENS];
-    int8_t         logits_arr[USER_FEED_MAX_TOKENS];
-
-    // Assign your framework's exact pointer properties safely
     batch.token = tokens;
     batch.pos = pos_arr;
     batch.n_seq_id = n_seq_arr;
@@ -449,38 +519,91 @@ int engine_feed_user(engine_t* e, const char* user_text_raw) {
     batch.logits = logits_arr;
     batch.n_tokens = 0;
 
-    llama_pos current_pos = e->pos;
+    llama_pos pos = e->pos;
 
-    // 5. Explicit assignment mapping
-    for (int i = 0; i < actual_tokens; ++i) {
-        pos_arr[i] = current_pos;
+    for (int i = 0; i < n_tokens; i++) {
+        pos_arr[i] = pos;
         n_seq_arr[i] = 1;
         seq_id_arr[i] = e->seq_id;
         seq_ptr_arr[i] = &seq_id_arr[i];
-        logits_arr[i] = (i == actual_tokens - 1) ? 1 : 0; // Logits requested for sampler only
-
+        logits_arr[i] = (i == n_tokens - 1);
         batch.n_tokens++;
-        current_pos++;
+        pos++;
     }
 
-    // 6. Execute inference decoding safely
-    int decode_rc = llama_decode(e->ctx, batch);
-    if (decode_rc != 0) {
-        // feeding failed, bail out
-        return decode_rc;
-    }
+    int rc = llama_decode(e->ctx, batch);
+    if (rc != 0) return rc;
 
-    // 7. Dynamic memory cleanup 
-    free(tokens);
-
-
-    // 8. Commit tracker values on success states
-    e->pos = current_pos;
+    e->pos = pos;
     e->kv_valid = true;
-    e->kv_len = current_pos;
+    e->kv_len = pos;
 
     return 0;
 }
+
+
+// ------------------------------------------------------------
+// Feed user message (templated) incrementally - STABLE NATIVE BATCH
+// ------------------------------------------------------------
+
+int engine_feed_user(engine_t* e, const char* user_text_raw) {
+    if (!e || !e->model || !e->ctx || !user_text_raw)
+        return -1;
+
+    const struct llama_vocab* vocab = llama_model_get_vocab(e->model);
+
+    char buf[4096];
+    engine_wrap_user(buf, sizeof(buf), user_text_raw);
+
+    llama_token tokens[2048];
+    int n_tokens = llama_tokenize(
+        vocab,
+        buf,
+        (int32_t)strlen(buf),
+        tokens,
+        2048,
+        false,
+        true
+    );
+    if (n_tokens <= 0) return -1;
+
+    struct llama_batch batch = { 0 };
+
+    llama_pos      pos_arr[2048];
+    int32_t        n_seq_arr[2048];
+    llama_seq_id   seq_id_arr[2048];
+    llama_seq_id* seq_ptr_arr[2048];
+    int8_t         logits_arr[2048];
+
+    batch.token = tokens;
+    batch.pos = pos_arr;
+    batch.n_seq_id = n_seq_arr;
+    batch.seq_id = seq_ptr_arr;
+    batch.logits = logits_arr;
+    batch.n_tokens = 0;
+
+    llama_pos pos = e->pos;
+
+    for (int i = 0; i < n_tokens; i++) {
+        pos_arr[i] = pos;
+        n_seq_arr[i] = 1;
+        seq_id_arr[i] = e->seq_id;
+        seq_ptr_arr[i] = &seq_id_arr[i];
+        logits_arr[i] = (i == n_tokens - 1);
+        batch.n_tokens++;
+        pos++;
+    }
+
+    int rc = llama_decode(e->ctx, batch);
+    if (rc != 0) return rc;
+
+    e->pos = pos;
+    e->kv_valid = true;
+    e->kv_len = pos;
+
+    return 0;
+}
+
 
 char* extract_websearch_query(const char* json) {
     const char* key = "\"query\":\"";
@@ -542,6 +665,24 @@ int repair_json(const char* input, char* output, size_t out_size) {
     return 0;
 }
 
+//llama3_web  stuffs
+bool detect_web_action(const char* s) {
+    return strstr(s, "{\"open\"") ||
+        strstr(s, "{\"click\"") ||
+        strstr(s, "{\"type\"") ||
+        strstr(s, "{\"submit\"") ||
+        strstr(s, "{\"extract\"");
+}
+
+bool detect_json_action(const char* s) {
+    return strstr(s, "{\"open\"") ||
+        strstr(s, "{\"click\"") ||
+        strstr(s, "{\"type\"") ||
+        strstr(s, "{\"submit\"") ||
+        strstr(s, "{\"extract\"");
+}
+
+
 int engine_generate_reply(
     engine_t* e,
     char* out,
@@ -571,6 +712,9 @@ int engine_generate_reply(
     jd.buf[0] = '\0';
     char repaired[2048];
 
+    const char* sys_prompt = engine_default_system_prompt();
+    fprintf(stderr, "\n=== FULL PROMPT SENT TO MODEL ===\n%s\n", sys_prompt);
+
     while (n_gen < max_tokens && out_len + 8 < out_size) {
 
         // 1. Sample next token
@@ -581,78 +725,111 @@ int engine_generate_reply(
         int n = llama_token_to_piece(vocab, tok, piece, sizeof(piece), 0, false);
         if (n < 0) break;
         if (n >= 0 && n < sizeof(piece)) piece[n] = '\0';
+               
+        fprintf(stderr, "[tok %02d] %s\n", n_gen, piece);
 
-        // 3. JSON STATE MACHINE FEED (Only process if there are characters)
-        if (n > 0) {
+        if (g_model_family != MODEL_LLAMA3_WEB && g_model_family != MODEL_HERMES2_WEB)
+        {
+            // 3. JSON STATE MACHINE FEED (Only process if there are characters)
+            if (n > 0) {
+                for (int i = 0; i < n; i++) {
+                    char c = piece[i];
+                    if (jd.len < sizeof(jd.buf) - 1) {
+                        jd.buf[jd.len++] = c;
+                        jd.buf[jd.len] = 0;
+                    }
+                    switch (jd.state) {
+                    case 0: if (c == '{') jd.state = 1; break;
+                    case 1: if (strstr(jd.buf, "{\"tool\":\"websearch\",\"query\":\"")) jd.state = 2; break;
+                    case 2: if (c == '}' && jd.len > 2 && jd.buf[jd.len - 2] == '"')
+                    {
+                        json_complete = true;
+                        break;
+                    }
+                    }
+                }
+            }
+
+            // 4. Detect JSON start
+            if (jd.state == 2 && !json_started)
+            {
+                json_started = true;
+                out_len = 0;
+                out[0] = '\0';
+            }
+
+            if (jd.state == 2)
+            {
+                bool fixed = repair_json(jd.buf, repaired, sizeof(repaired));
+                if (fixed) {
+                    json_complete = true;
+                    strncpy(json_block, repaired, sizeof(json_block) - 1);
+                    json_block[sizeof(json_block) - 1] = 0;
+                }
+                else
+                {
+                    if (json_complete)
+                    {
+                        strncpy(json_block, jd.buf, sizeof(json_block) - 1);
+                        json_block[sizeof(json_block) - 1] = 0;
+                    }
+                }
+            }
+
+            // 5. Capture JSON or normal text
+            if (out_len + n < out_size - 1) {
+                memcpy(out + out_len, piece, n);
+                out_len += n;
+                out[out_len] = '\0';
+            }
+
+            // =====================================================================
+            // RUN STEP 6 HERE FIRST: Check if JSON is complete BEFORE checking EOT!
+            // =====================================================================
+            if (json_complete) {
+                /* strncpy(json_block, repaired, sizeof(json_block) - 1);
+                 json_block[sizeof(json_block) - 1] = 0;*/
+                char* query = extract_websearch_query(json_block);
+                if (query) {
+                    char* argvv[1] = { query };
+                    char* result = plugin_websearch(1, argvv);
+                    free(query);
+
+                    if (result) {
+                        snprintf(out, out_size, "%s\n\n[WEBSEARCH RESULT]\n%s", json_block, result);
+                        free(result);
+                    }
+
+                    // Clean up structures completely
+                    jd.state = 0;
+                    jd.len = 0;
+                    jd.buf[0] = 0;
+                    json_started = false;
+                    json_complete = false;
+                    memset(json_block, 0, sizeof(json_block));
+                    llama_batch_free(batch);
+                    return (int)strlen(out); // Exits cleanly with the search results!
+                }
+            }
+        }
+
+        if (g_model_family == MODEL_LLAMA3_WEB)        
+        {  // Feed characters into web JSON buffer
             for (int i = 0; i < n; i++) {
                 char c = piece[i];
                 if (jd.len < sizeof(jd.buf) - 1) {
                     jd.buf[jd.len++] = c;
                     jd.buf[jd.len] = 0;
                 }
-                switch (jd.state) {
-                case 0: if (c == '{') jd.state = 1; break;
-                case 1: if (strstr(jd.buf, "{\"tool\":\"websearch\",\"query\":\"")) jd.state = 2; break;
-                case 2: if (c == '}' && jd.len > 2 && jd.buf[jd.len - 2] == '"') 
-                {
-                    json_complete = true;                 
-                    break; 
-                }
-                }
             }
-        }
 
-        // 4. Detect JSON start
-        if (jd.state == 2 && !json_started)
-        {
-            json_started = true;
-            out_len = 0;
-            out[0] = '\0';
-        }
+            // Check if a browser action JSON is complete
+            if (detect_web_action(jd.buf)) {
+                // We got a browser action JSON
+                strncpy(out, jd.buf, out_size - 1);
+                out[out_size - 1] = 0;
 
-        if (jd.state == 2)
-        { 
-            bool fixed = repair_json(jd.buf, repaired, sizeof(repaired));
-            if (fixed) {
-                json_complete = true;
-                strncpy(json_block, repaired, sizeof(json_block) - 1);
-                json_block[sizeof(json_block) - 1] = 0;
-            }
-            else 
-            {     
-                if (json_complete) 
-                {
-                    strncpy(json_block, jd.buf, sizeof(json_block) - 1);
-                    json_block[sizeof(json_block) - 1] = 0;
-                }
-            }
-        }
 
-        // 5. Capture JSON or normal text
-        if (out_len + n < out_size - 1) {
-            memcpy(out + out_len, piece, n);
-            out_len += n;
-            out[out_len] = '\0';
-        }
-
-        // =====================================================================
-        // RUN STEP 6 HERE FIRST: Check if JSON is complete BEFORE checking EOT!
-        // =====================================================================
-        if (json_complete) {
-           /* strncpy(json_block, repaired, sizeof(json_block) - 1);
-            json_block[sizeof(json_block) - 1] = 0;*/
-            char* query = extract_websearch_query(json_block);
-            if (query) {
-                char* argvv[1] = { query };
-                char* result = plugin_websearch(1, argvv);
-                free(query);
-
-                if (result) {
-                    snprintf(out, out_size, "%s\n\n[WEBSEARCH RESULT]\n%s", json_block, result);
-                    free(result);
-                }
-
-                // Clean up structures completely
                 jd.state = 0;
                 jd.len = 0;
                 jd.buf[0] = 0;
@@ -660,7 +837,42 @@ int engine_generate_reply(
                 json_complete = false;
                 memset(json_block, 0, sizeof(json_block));
                 llama_batch_free(batch);
-                return (int)strlen(out); // Exits cleanly with the search results!
+                return (int)strlen(out);
+            }else
+            {
+                if (tok == eos_tok) break;
+                if (tok == eot_tok && eot_tok != -1) break;
+                if (llama_token_is_control(vocab, tok)) break;               
+            }
+
+            
+        }
+
+        if (g_model_family == MODEL_HERMES2_WEB) {
+
+            for (int i = 0; i < n; i++) {
+                char c = piece[i];
+                if (jd.len < sizeof(jd.buf) - 1) {
+                    jd.buf[jd.len++] = c;
+                    jd.buf[jd.len] = 0;
+                }
+            }
+
+            if (detect_json_action(jd.buf)) {
+                strncpy(out, jd.buf, out_size - 1);
+                out[out_size - 1] = 0;
+
+                jd.state = 0;
+                jd.len = 0;
+                jd.buf[0] = 0;
+
+                llama_batch_free(batch);
+                return (int)strlen(out);
+            }
+
+            if (tok == eos_tok || tok == eot_tok || llama_token_is_control(vocab, tok))
+            {
+                break;
             }
         }
 
@@ -806,6 +1018,17 @@ int engine_chat_html(
     // Feed Clean User Turn (No text mixed into the question)
     // ------------------------------------------------------------
 
+    // Feed system prompt once per session / when KV is empty
+    if (!e->kv_valid) {
+        const char* sys = engine_default_system_prompt();
+        int sys_rc = engine_feed_system(e, sys);
+        if (sys_rc != 0) {
+            engine_reset(e);
+            return -1;
+        }
+    }
+
+
     // This calls engine_feed_user with ONLY your isolated question (e.g. "how fast is a f-16?")
     int feed_rc = engine_feed_user(e, extracted_query);
 
@@ -899,7 +1122,8 @@ void engine_reset(engine_t* e) {
 
     const char* sys_prompt = engine_default_system_prompt();
     //engine_feed_system_prompt(e, "You are a helpful assistant.");
-    engine_feed_system_prompt(e, sys_prompt);
+   // engine_feed_system_prompt(e, sys_prompt);
+    engine_feed_system(e, sys_prompt);
 
 }
 
