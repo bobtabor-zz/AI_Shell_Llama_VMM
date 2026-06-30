@@ -712,8 +712,8 @@ int engine_generate_reply(
     jd.buf[0] = '\0';
     char repaired[2048];
 
-    const char* sys_prompt = engine_default_system_prompt();
-    fprintf(stderr, "\n=== FULL PROMPT SENT TO MODEL ===\n%s\n", sys_prompt);
+   /* const char* sys_prompt = engine_default_system_prompt();
+    fprintf(stderr, "\n=== FULL PROMPT SENT TO MODEL ===\n%s\n", sys_prompt);*/  /// test output
 
     while (n_gen < max_tokens && out_len + 8 < out_size) {
 
@@ -726,7 +726,7 @@ int engine_generate_reply(
         if (n < 0) break;
         if (n >= 0 && n < sizeof(piece)) piece[n] = '\0';
                
-        fprintf(stderr, "[tok %02d] %s\n", n_gen, piece);
+       // fprintf(stderr, "[tok %02d] %s\n", n_gen, piece); // test output
 
         if (g_model_family != MODEL_LLAMA3_WEB && g_model_family != MODEL_HERMES2_WEB)
         {
@@ -813,8 +813,9 @@ int engine_generate_reply(
             }
         }
 
-        if (g_model_family == MODEL_LLAMA3_WEB)        
-        {  // Feed characters into web JSON buffer
+        if (g_model_family == MODEL_LLAMA3_WEB)
+        {
+            // 1. Accumulate characters into JSON buffer
             for (int i = 0; i < n; i++) {
                 char c = piece[i];
                 if (jd.len < sizeof(jd.buf) - 1) {
@@ -823,30 +824,28 @@ int engine_generate_reply(
                 }
             }
 
-            // Check if a browser action JSON is complete
+            // 2. If JSON action is complete → return immediately
             if (detect_web_action(jd.buf)) {
-                // We got a browser action JSON
                 strncpy(out, jd.buf, out_size - 1);
                 out[out_size - 1] = 0;
 
-
+                // Reset JSON state
                 jd.state = 0;
                 jd.len = 0;
                 jd.buf[0] = 0;
                 json_started = false;
                 json_complete = false;
                 memset(json_block, 0, sizeof(json_block));
+
                 llama_batch_free(batch);
                 return (int)strlen(out);
-            }else
-            {
-                if (tok == eos_tok) break;
-                if (tok == eot_tok && eot_tok != -1) break;
-                if (llama_token_is_control(vocab, tok)) break;               
             }
 
-            
+            // 3. DO NOT break on EOS/EOT/control tokens until JSON is complete
+            //    WebLlama often emits trailing control tokens AFTER the JSON block.
+            continue;
         }
+
 
         if (g_model_family == MODEL_HERMES2_WEB) {
 
