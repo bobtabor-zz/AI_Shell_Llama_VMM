@@ -99,7 +99,7 @@ export default function App() {
         if (!hasLoadedModel.current) {
             hasLoadedModel.current = true;
             // Initial startup model loading execution sequence 
-            invoke("load_model", { path: "C:\\Projects\\AI_Shell-main\\Meta-Llama-3-8B-Instruct-Q2_K.gguf" })
+            invoke("load_model", { path: "C:\\Projects\\AI_Shell-main\\Hermes-2-Pro-Llama-3-8B-Q4_K_M.gguf" })
                 .then(res => console.log("Model initialized:", res))
                 .catch(err => console.error("Model boot error:", err));
         }
