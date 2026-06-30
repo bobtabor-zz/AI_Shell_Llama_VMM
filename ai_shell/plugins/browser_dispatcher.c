@@ -9,7 +9,8 @@
 // Parse Llama3-Web JSON into action struct
 // ------------------------------------------------------------
 web_action_t parse_web_action(const char* json) {
-    web_action_t act = { 0 };
+    web_action_t act;
+    memset(&act, 0, sizeof(web_action_t));
 
     if (strstr(json, "\"open\"")) act.type = WEB_ACT_OPEN;
     else if (strstr(json, "\"click\"")) act.type = WEB_ACT_CLICK;
