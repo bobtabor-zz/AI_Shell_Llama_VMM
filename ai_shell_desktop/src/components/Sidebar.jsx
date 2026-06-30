@@ -2,9 +2,10 @@ import { useState } from "react";
 
 // 📂 Map model names directly to your real local system GGUF files
 const AVAILABLE_MODELS = {
-    "llama-3-8b": "G:\\Bob_Files\\Projects\\AI_Shell-main\\Meta-Llama-3-8B-Instruct-Q2_K.gguf",
-    "phi-3-mini": "G:\\Bob_Files\\Projects\\AI_Shell-main\\Phi-3-mini-4k-instruct-q4.gguf",
-    "smollm-1.7b": "G:\\Bob_Files\\Projects\\AI_Shell-main\\smollm-1.7b-instruct-q4_k_m.gguf",
+    "llama-3-8b": "C:\\Projects\\AI_Shell-main\\Meta-Llama-3-8B-Instruct-Q4_K_M.gguf",
+    "phi-3-mini": "C:\\Projects\\AI_Shell-main\\Phi-3-mini-4k-instruct-q4.gguf",
+    "smollm-1.7b": "C:\\Projects\\AI_Shell-main\\smollm-1.7b-instruct-q4_k_m.gguf",
+    "hermes-2-pro": "C:\\Projects\\AI_Shell-main\\Hermes-2-Pro-Llama-3-8B-Q4_K_M.gguf",
 };
 
 export default function Sidebar({ setSessionId, activeSessionId, history, onDeleteSession, onModelChange }) {
