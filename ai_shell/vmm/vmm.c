@@ -19,18 +19,6 @@ extern "C" {
 
 vmm_state_t g_vmm_state = { 0 };
 
-//
-//typedef struct vmm_state {
-//    HANDLE    file;
-//    HANDLE    mapping;
-//    uint64_t  size;
-//    uint64_t  used;
-//    int       default_numa_node;
-//    uint8_t* window_base;
-//    uint64_t  window_offset;
-//    uint64_t  window_size;
-//} vmm_state_t;
-
 static vmm_state_t g_vmm;
 
 struct vmm {
@@ -44,70 +32,6 @@ CRITICAL_SECTION vmm_lock;
 
 
 static volatile LONG vmm_is_lock_init = 0;
- //
- //void vmm_inspect(vmm_model_t* m) {
- //    if (!m || !m->vmm || !m->meta) {
- //        fprintf(stderr, "[VMM] inspect: invalid model\n");
- //        return;
- //    }
- //    int real_count = 0;
- //    uint64_t file_size = vmm_budget(m->vmm);
-
- //    fprintf(stderr, "\n==================== VMM INSPECTOR ====================\n");
- //    fprintf(stderr, "File: vmm.bin\n");
- //    fprintf(stderr, "File size: %llu bytes\n", (unsigned long long)file_size);
- //    fprintf(stderr, "Tensor count: %u\n", m->tensor_count);
- //    fprintf(stderr, "Meta offset: %llu\n", (unsigned long long)m->meta_offset);
- //    fprintf(stderr, "Data offset: %llu\n", (unsigned long long)m->data_offset);
- //    fprintf(stderr, "--------------------------------------------------------\n");
-
- //    uint64_t last_end = m->data_offset;
-
- //    for (uint32_t i = 0; i < m->tensor_count; i++) {
- //        vmm_tensor_meta_t* t = &m->meta[i];
-
- //        // skip unused / zeroed entries
- //        if (t->size_bytes == 0 || t->offset == 0) {
- //            continue;   // or `break;` if you know all remaining are zero
- //        }
- //        real_count++;
- //        uint64_t start = t->offset;
- //        uint64_t end = t->offset + t->size_bytes;
-
- //        if (start > last_end) {
- //            fprintf(stderr,
- //                "  GAP: %llu bytes (0x%llX - 0x%llX)\n",
- //                (unsigned long long)(start - last_end),
- //                (unsigned long long)last_end,
- //                (unsigned long long)start);
- //        }
-
- //        fprintf(stderr,
- //            "Tensor %4u | %-40s\n"
- //            "  dtype=%u  dims=%u  size=%llu\n"
- //            "  offset=0x%llX  end=0x%llX\n"
- //            "  shape=[%llu %llu %llu %llu]\n"
- //            "--------------------------------------------------------\n",
- //            i,
- //            t->name,
- //            t->dtype,
- //            t->n_dims,
- //            (unsigned long long)t->size_bytes,
- //            (unsigned long long)start,
- //            (unsigned long long)end,
- //            (unsigned long long)t->ne[0],
- //            (unsigned long long)t->ne[1],
- //            (unsigned long long)t->ne[2],
- //            (unsigned long long)t->ne[3]
- //        );
-
- //        last_end = end;
- //    }
-
- //       fprintf(stderr, "[VMM] real tensors = %u\n", real_count);
-
- //    fprintf(stderr, "================== END VMM INSPECTOR ==================\n\n");
- //}
 
  static const uint64_t VMM_CAPACITY = 16ull * 1024 * 1024 * 1024;
 
@@ -168,7 +92,7 @@ static volatile LONG vmm_is_lock_init = 0;
 
      // 3. Lazy-initialize the file pointer cleanly (Only open it ONCE if it is closed)
      if (!vmm_fp) {
-         const char* filename = "C:\\Users\\Bobio\\source\\ai_shell\\vmm.bin";
+         const char* filename = "vmm.bin";
 
          // Attempt to open in read/write mode ("r+b") so we can append without wiping data
          vmm_fp = _fsopen(filename, "r+b", _SH_DENYWR);
@@ -245,3 +169,31 @@ static volatile LONG vmm_is_lock_init = 0;
      if (fread(data, 1, size, vmm_fp) != size) return -1;
      return 0;
  }
+
+
+ uint64_t vmm_next_offset;
+ uint64_t vmm_size;
+ uint8_t* vmm_base;
+
+ uint64_t vmm_alloc(size_t size) {
+     uint64_t off = vmm_next_offset;
+
+     // simple linear bump allocator
+     vmm_next_offset += size;
+
+     if (vmm_next_offset > vmm_size) {
+         // out of mapped space
+         return 0;
+     }
+
+     return off;
+ }
+
+
+ void* vmm_get_tensor_ptr(uint64_t offset) {
+     return vmm_base + offset;
+ }
+
+
+
+

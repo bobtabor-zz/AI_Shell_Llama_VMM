@@ -104,36 +104,7 @@ extern "C" {
     //void vmm_model_close(vmm_model_t* m);
     void vmm_inspect(vmm_model_t* m);
 
-    // ---- Disk-backed VMM core ----
-
-    //typedef enum {
-    //    VMM_MODE_CREATE_TRUNCATE = 0,  // build from GGUF, overwrite vmm.bin
-    //    VMM_MODE_OPEN_EXISTING = 1   // use existing vmm.bin, do NOT truncate
-    //} vmm_mode_t;
-
-    //// lifecycle
-    //void   vmm_destroy(vmm_t* v);
-
-    //// stats
-    //size_t vmm_budget(vmm_t* v);
-    //size_t vmm_used(vmm_t* v);
-
-    //// alloc
-    //int    vmm_alloc(vmm_t* v, size_t bytes, vmm_flags_t flags, int numa, vmm_region_t* out);
-    //int    vmm_free(vmm_t* v, vmm_region_t* r);
-
-    //// mapping
-    //void* vmm_map(vmm_t* v, uint64_t offset, size_t length);
-    //void   vmm_unmap(vmm_t* v, void* ptr, size_t length);
-
-    //// pin/prefetch
-    //int    vmm_pin(vmm_t* v, vmm_region_t* r);
-    //int    vmm_unpin(vmm_t* v, vmm_region_t* r);
-    //int    vmm_prefetch(vmm_t* v, void* ptr, size_t bytes);
-
-    //// NUMA
-    //void   vmm_set_default_numa(vmm_t* v, int node);
-    //int    vmm_get_default_numa(vmm_t* v);
+  
 
 #ifdef __cplusplus
 }
