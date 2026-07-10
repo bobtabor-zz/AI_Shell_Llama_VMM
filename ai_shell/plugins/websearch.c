@@ -24,59 +24,88 @@
 extern char* plugin_ddg(int argc, char** argv);
 
 // Extract readable text from HTML (no tags, no scripts, no CSS)
-static char* extract_text_from_html(const char* html) {
-    size_t len = strlen(html);
-    char* out = malloc(len + 1);
-    if (!out) return NULL;
+//static char* extract_text_from_html(const char* html) {
+//    size_t len = strlen(html);
+//    char* out = malloc(len + 1);
+//    if (!out) return NULL;
+//
+//    int o = 0;
+//    bool in_tag = false;
+//    bool skip_block = false;
+//
+//    for (size_t i = 0; i < len; i++) {
+//        char c = html[i];
+//
+//        if (!skip_block &&
+//            (_strnicmp(&html[i], "<script", 7) == 0 ||
+//                _strnicmp(&html[i], "<style", 6) == 0 ||
+//                _strnicmp(&html[i], "<noscript", 9) == 0 ||
+//                _strnicmp(&html[i], "<svg", 4) == 0 ||
+//                _strnicmp(&html[i], "<meta", 5) == 0 ||
+//                _strnicmp(&html[i], "<link", 5) == 0 ||
+//                _strnicmp(&html[i], "<header", 7) == 0 ||
+//                _strnicmp(&html[i], "<footer", 7) == 0 ||
+//                _strnicmp(&html[i], "<nav", 4) == 0)) {
+//            skip_block = true;
+//        }
+//
+//        if (skip_block &&
+//            (_strnicmp(&html[i], "</script>", 9) == 0 ||
+//                _strnicmp(&html[i], "</style>", 8) == 0 ||
+//                _strnicmp(&html[i], "</noscript>", 11) == 0 ||
+//                _strnicmp(&html[i], "</svg>", 6) == 0 ||
+//                _strnicmp(&html[i], "</header>", 9) == 0 ||
+//                _strnicmp(&html[i], "</footer>", 9) == 0 ||
+//                _strnicmp(&html[i], "</nav>", 6) == 0)) {
+//            skip_block = false;
+//            continue;
+//        }
+//
+//        if (skip_block) continue;
+//
+//        if (c == '<') { in_tag = true; continue; }
+//        if (c == '>') { in_tag = false; continue; }
+//        if (in_tag) continue;
+//
+//        if (c == '\n' || c == '\r') continue;
+//        if (c == '\t') c = ' ';
+//
+//        out[o++] = c;
+//    }
+//
+//    out[o] = '\0';
+//    return out;
+//}
 
-    int o = 0;
-    bool in_tag = false;
-    bool skip_block = false;
+static char* extract_google_urls(const char* html) {
+    const char* p = html;
+    size_t cap = 4096;
+    char* out = malloc(cap);
+    size_t o = 0;
 
-    for (size_t i = 0; i < len; i++) {
-        char c = html[i];
+    while ((p = strstr(p, "href=\"/url?q=")) != NULL) {
+        p += strlen("href=\"/url?q=");
 
-        if (!skip_block &&
-            (_strnicmp(&html[i], "<script", 7) == 0 ||
-                _strnicmp(&html[i], "<style", 6) == 0 ||
-                _strnicmp(&html[i], "<noscript", 9) == 0 ||
-                _strnicmp(&html[i], "<svg", 4) == 0 ||
-                _strnicmp(&html[i], "<meta", 5) == 0 ||
-                _strnicmp(&html[i], "<link", 5) == 0 ||
-                _strnicmp(&html[i], "<header", 7) == 0 ||
-                _strnicmp(&html[i], "<footer", 7) == 0 ||
-                _strnicmp(&html[i], "<nav", 4) == 0)) {
-            skip_block = true;
+        const char* start = p;
+        const char* end = strchr(p, '&');
+        if (!end) break;
+
+        size_t len = end - start;
+        if (len < 5 || len > 2000) continue;
+
+        if (o + len + 2 > cap) {
+            cap *= 2;
+            out = realloc(out, cap);
         }
 
-        if (skip_block &&
-            (_strnicmp(&html[i], "</script>", 9) == 0 ||
-                _strnicmp(&html[i], "</style>", 8) == 0 ||
-                _strnicmp(&html[i], "</noscript>", 11) == 0 ||
-                _strnicmp(&html[i], "</svg>", 6) == 0 ||
-                _strnicmp(&html[i], "</header>", 9) == 0 ||
-                _strnicmp(&html[i], "</footer>", 9) == 0 ||
-                _strnicmp(&html[i], "</nav>", 6) == 0)) {
-            skip_block = false;
-            continue;
-        }
-
-        if (skip_block) continue;
-
-        if (c == '<') { in_tag = true; continue; }
-        if (c == '>') { in_tag = false; continue; }
-        if (in_tag) continue;
-
-        if (c == '\n' || c == '\r') continue;
-        if (c == '\t') c = ' ';
-
-        out[o++] = c;
+        memcpy(out + o, start, len);
+        o += len;
+        out[o++] = '\n';
     }
 
     out[o] = '\0';
     return out;
 }
-
 
 
 // ------------------------------------------------------------
@@ -699,13 +728,21 @@ char* plugin_websearch(int argc, char** argv) {
                cJSON_AddStringToObject(item, "url", full_url);
 
                // CLEAN THE HTML
-               char* clean = extract_text_from_html(html_item->valuestring);
+              /* char* clean = extract_text_from_html(html_item->valuestring);
                if (clean) {
                    cJSON_AddStringToObject(item, "snippet", clean);
                    free(clean);
                }
                else {
                    cJSON_AddStringToObject(item, "snippet", "No readable text extracted.");
+               }*/
+               char* urls = extract_google_urls(html_item->valuestring);
+               if (urls && strlen(urls) > 0) {
+                   cJSON_AddStringToObject(item, "snippet", urls);
+                   free(urls);
+               }
+               else {
+                   cJSON_AddStringToObject(item, "snippet", "No URLs found.");
                }
 
                cJSON_AddItemToArray(master_results, item);
