@@ -27,6 +27,17 @@
 #include <sys/sysctl.h>
 #endif
 
+extern "C" {
+#include "..\..\ai_shell\vmm\vmm.h"
+}
+
+
+static bool ggml_vmm_enabled() {
+    const char * env = getenv("LLAMA_VMM");
+    return env && strcmp(env, "1") == 0;
+}
+
+
 
 // backend buffer type
 
@@ -2233,17 +2244,56 @@ static void ggml_backend_cpu_buffer_memset_tensor(ggml_backend_buffer_t buffer, 
 
     GGML_UNUSED(buffer);
 }
-
-static void ggml_backend_cpu_buffer_set_tensor(ggml_backend_buffer_t buffer, struct ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
+//
+//static void ggml_backend_cpu_buffer_set_tensor(ggml_backend_buffer_t buffer, struct ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
+//    GGML_ASSERT(tensor);
+//    memcpy((char *)tensor->data + offset, data, size);
+//
+//    GGML_UNUSED(buffer);
+//}
+//
+//static void ggml_backend_cpu_buffer_get_tensor(ggml_backend_buffer_t buffer, const struct ggml_tensor * tensor, void * data, size_t offset, size_t size) {
+//    GGML_ASSERT(tensor);
+//    memcpy(data, (const char *)tensor->data + offset, size);
+//
+//    GGML_UNUSED(buffer);
+//}
+static void ggml_backend_cpu_buffer_set_tensor(ggml_backend_buffer_t buffer,
+                                               struct ggml_tensor *  tensor,
+                                               const void *          data,
+                                               size_t                offset,
+                                               size_t                size) {
     GGML_ASSERT(tensor);
-    memcpy((char *)tensor->data + offset, data, size);
+
+    // Use VMM if enabled and tensor has VMM offset
+    if (ggml_vmm_enabled() && tensor->extra) {
+        uint8_t * base = (uint8_t *) vmm_get_tensor_ptr((uint64_t) tensor->extra);
+        memcpy(base + offset, data, size);
+        return;
+    }
+
+    // Normal CPU mode
+    memcpy((char *) tensor->data + offset, data, size);
 
     GGML_UNUSED(buffer);
 }
 
-static void ggml_backend_cpu_buffer_get_tensor(ggml_backend_buffer_t buffer, const struct ggml_tensor * tensor, void * data, size_t offset, size_t size) {
+static void ggml_backend_cpu_buffer_get_tensor(ggml_backend_buffer_t      buffer,
+                                               const struct ggml_tensor * tensor,
+                                               void *                     data,
+                                               size_t                     offset,
+                                               size_t                     size) {
     GGML_ASSERT(tensor);
-    memcpy(data, (const char *)tensor->data + offset, size);
+
+    // Use VMM if enabled and tensor has VMM offset
+    if (ggml_vmm_enabled() && tensor->extra) {
+        const uint8_t * base = (const uint8_t *) vmm_get_tensor_ptr((uint64_t) tensor->extra);
+        memcpy(data, base + offset, size);
+        return;
+    }
+
+    // Normal CPU mode
+    memcpy(data, (const char *) tensor->data + offset, size);
 
     GGML_UNUSED(buffer);
 }
@@ -2302,16 +2352,56 @@ static const char * ggml_backend_cpu_buffer_type_get_name(ggml_backend_buffer_ty
     GGML_UNUSED(buft);
 }
 
-static ggml_backend_buffer_t ggml_backend_cpu_buffer_type_alloc_buffer(ggml_backend_buffer_type_t buft, size_t size) {
-    void * data = ggml_aligned_malloc(size);
 
-    if (data == NULL) {
-        GGML_LOG_ERROR("%s: failed to allocate buffer of size %zu\n", __func__, size);
-        return NULL;
+static const char * ggml_backend_vmm_buffer_type_get_name(ggml_backend_buffer_type_t buft) {
+    return "VMM";
+}
+
+static ggml_backend_buffer_t ggml_backend_vmm_alloc_buffer(ggml_backend_buffer_type_t buft, size_t size) {
+    uint64_t off = vmm_alloc(size);  // your existing VMM allocator
+    void *   ptr = vmm_get_tensor_ptr(off);
+
+    return ggml_backend_buffer_init(buft,
+                                    ggml_backend_cpu_buffer_from_ptr_i,  // GGML already has this iface
+                                    (void *) off,                        // store offset, not pointer
+                                    size);
+}
+
+static ggml_backend_buffer_type_t ggml_backend_vmm_buffer_type(void) {
+    static struct ggml_backend_buffer_type buft = {
+        .iface = {
+            .get_name       = ggml_backend_vmm_buffer_type_get_name,
+            .alloc_buffer   = ggml_backend_vmm_alloc_buffer,
+            .get_alignment  = ggml_backend_cpu_buffer_type_get_alignment,
+            .get_max_size   = NULL,
+            .get_alloc_size = NULL,
+            .is_host        = ggml_backend_cpu_buffer_type_is_host,
+        },
+        .device  = NULL,
+        .context = NULL,
+    };
+    return &buft;
+
+
+
+static ggml_backend_buffer_type_t ggml_backend_cpu_device_get_buffer_type(ggml_backend_dev_t dev) {
+        if (ggml_vmm_enabled()) {
+            return ggml_backend_vmm_buffer_type();  // VMM override
+        }
+        return ggml_backend_cpu_buffer_type();      // normal CPU
     }
 
-    return ggml_backend_buffer_init(buft, ggml_backend_cpu_buffer_i, data, size);
-}
+
+//static ggml_backend_buffer_t ggml_backend_cpu_buffer_type_alloc_buffer(ggml_backend_buffer_type_t buft, size_t size) {
+//    void * data = ggml_aligned_malloc(size);
+//  //  void * data = vmm_alloc(size);  // your VMM allocator
+//    if (data == NULL) {
+//        GGML_LOG_ERROR("%s: failed to allocate buffer of size %zu\n", __func__, size);
+//        return NULL;
+//    }
+//
+//    return ggml_backend_buffer_init(buft, ggml_backend_cpu_buffer_i, data, size);
+//}
 
 static size_t ggml_backend_cpu_buffer_type_get_alignment(ggml_backend_buffer_type_t buft) {
     return TENSOR_ALIGNMENT;
