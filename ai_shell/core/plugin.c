@@ -4,6 +4,17 @@
 
 #define MAX_PLUGINS 64
 
+
+const char* EXA_API_KEY = "9f2e59ea-3380-49df-9a69-111037639ecf";
+
+void init_exa_key(void)
+{
+    const char* env = getenv("EXA_API_KEY");
+    if (env)
+        EXA_API_KEY = env;
+}
+
+
 typedef struct {
     const char* name;
     plugin_fn fn;
