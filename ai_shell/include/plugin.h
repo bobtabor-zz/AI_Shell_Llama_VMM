@@ -24,6 +24,10 @@ void plugin_register(const char* name, plugin_fn fn);
 plugin_fn plugin_lookup(const char* name);
 
 
+extern const char* EXA_API_KEY;
+
+void init_exa_key(void);
+
 // Declare plugin functions
 char* plugin_ddg(int argc, char** argv);
 char* plugin_brave(int argc, char** argv);
@@ -31,6 +35,8 @@ char* plugin_chromium(int argc, char** argv);
 char* plugin_summarize_file(int argc, char** argv);
 char* plugin_websearch(int argc, char** argv);
 char* plugin_summarize_file_html(int argc, char** argv);
+char* plugin_exa_search(int argc, char** argv);
+char* plugin_exa_fetch(int argc, char** argv);
 
 
 #endif
