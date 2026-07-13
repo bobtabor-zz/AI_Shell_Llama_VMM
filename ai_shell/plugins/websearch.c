@@ -8,74 +8,13 @@
 #include "cJSON.h"
 #include <stdbool.h>
 #include <ctype.h>
+#include "exa_search.h"
+#include "exa_fetch.h"
 
 #pragma comment(lib, "winhttp.lib")
 
-//
-//struct GoogleMemory {
-//    char* data;
-//    size_t size;
-//};
-
-//#include <deps/curl/curl.h>
-
-
 // Forward declaration of DDG plugin (from ddg.c)
 extern char* plugin_ddg(int argc, char** argv);
-
-// Extract readable text from HTML (no tags, no scripts, no CSS)
-//static char* extract_text_from_html(const char* html) {
-//    size_t len = strlen(html);
-//    char* out = malloc(len + 1);
-//    if (!out) return NULL;
-//
-//    int o = 0;
-//    bool in_tag = false;
-//    bool skip_block = false;
-//
-//    for (size_t i = 0; i < len; i++) {
-//        char c = html[i];
-//
-//        if (!skip_block &&
-//            (_strnicmp(&html[i], "<script", 7) == 0 ||
-//                _strnicmp(&html[i], "<style", 6) == 0 ||
-//                _strnicmp(&html[i], "<noscript", 9) == 0 ||
-//                _strnicmp(&html[i], "<svg", 4) == 0 ||
-//                _strnicmp(&html[i], "<meta", 5) == 0 ||
-//                _strnicmp(&html[i], "<link", 5) == 0 ||
-//                _strnicmp(&html[i], "<header", 7) == 0 ||
-//                _strnicmp(&html[i], "<footer", 7) == 0 ||
-//                _strnicmp(&html[i], "<nav", 4) == 0)) {
-//            skip_block = true;
-//        }
-//
-//        if (skip_block &&
-//            (_strnicmp(&html[i], "</script>", 9) == 0 ||
-//                _strnicmp(&html[i], "</style>", 8) == 0 ||
-//                _strnicmp(&html[i], "</noscript>", 11) == 0 ||
-//                _strnicmp(&html[i], "</svg>", 6) == 0 ||
-//                _strnicmp(&html[i], "</header>", 9) == 0 ||
-//                _strnicmp(&html[i], "</footer>", 9) == 0 ||
-//                _strnicmp(&html[i], "</nav>", 6) == 0)) {
-//            skip_block = false;
-//            continue;
-//        }
-//
-//        if (skip_block) continue;
-//
-//        if (c == '<') { in_tag = true; continue; }
-//        if (c == '>') { in_tag = false; continue; }
-//        if (in_tag) continue;
-//
-//        if (c == '\n' || c == '\r') continue;
-//        if (c == '\t') c = ' ';
-//
-//        out[o++] = c;
-//    }
-//
-//    out[o] = '\0';
-//    return out;
-//}
 
 static char* extract_google_urls(const char* html) {
     const char* p = html;
@@ -643,60 +582,7 @@ char* plugin_websearch(int argc, char** argv) {
         free(ddg);
     }
 
-    // ==================== 4. BRAVE SEARCH SECTOR ====================
-  
-    //
-    //char* brave = plugin_brave(argc, argv);
-    //if (brave) {
-    //    cJSON* brave_json = cJSON_Parse(brave);
-    //    if (brave_json) {
-    //        collected_any_data = true;
-
-    //        // Brave Search nests web results inside a "web" object under a "results" array
-    //        cJSON* web_root = cJSON_GetObjectItemCaseSensitive(brave_json, "web");
-    //        cJSON* web_results = web_root ? cJSON_GetObjectItemCaseSensitive(web_root, "results") : NULL;
-
-    //        if (web_results && cJSON_IsArray(web_results)) {
-    //            cJSON* element = NULL;
-    //            cJSON_ArrayForEach(element, web_results) {
-    //                // Brave uses standard "title", "description" (snippet), and "url"
-    //                cJSON* title_item = cJSON_GetObjectItemCaseSensitive(element, "title");
-    //                cJSON* snippet_item = cJSON_GetObjectItemCaseSensitive(element, "description");
-    //                cJSON* url_item = cJSON_GetObjectItemCaseSensitive(element, "url");
-
-    //                if (title_item && cJSON_IsString(title_item)) {
-    //                    // Brave's API is paid and clean, but keeping the protection safety block
-    //                    if (url_item && url_item->valuestring) {
-    //                        if (strstr(url_item->valuestring, "aclick") != NULL ||
-    //                            strstr(url_item->valuestring, "ad_") != NULL) {
-    //                            continue;
-    //                        }
-    //                    }
-
-    //                    cJSON* item = cJSON_CreateObject();
-    //                    cJSON_AddStringToObject(item, "source", "Brave");
-
-    //                    char combined[1024] = { 0 };
-    //                    snprintf(combined, sizeof(combined), "%s - %s",
-    //                        title_item->valuestring,
-    //                        (snippet_item && snippet_item->valuestring) ? snippet_item->valuestring : "");
-
-    //                    cJSON_AddStringToObject(item, "title", combined);
-    //                    if (url_item && url_item->valuestring) {
-    //                        cJSON_AddStringToObject(item, "url", url_item->valuestring);
-    //                    }
-    //                    cJSON_AddItemToArray(master_results, item);
-    //                }
-    //            }
-    //        }
-
-    //        cJSON_Delete(brave_json);
-    //    }
-
-    //    free(brave);
-    //}
-
-    // ==================== 5. CHROMIUM SEARCH SECTOR ====================
+   // ==================== 4. CHROMIUM SEARCH SECTOR ====================
 
     char* chromium = plugin_chromium(argc, argv);
     if (chromium) {
@@ -727,15 +613,6 @@ char* plugin_websearch(int argc, char** argv) {
                    "https://www.google.com/search?q=%s", query);
                cJSON_AddStringToObject(item, "url", full_url);
 
-               // CLEAN THE HTML
-              /* char* clean = extract_text_from_html(html_item->valuestring);
-               if (clean) {
-                   cJSON_AddStringToObject(item, "snippet", clean);
-                   free(clean);
-               }
-               else {
-                   cJSON_AddStringToObject(item, "snippet", "No readable text extracted.");
-               }*/
                char* urls = extract_google_urls(html_item->valuestring);
                if (urls && strlen(urls) > 0) {
                    cJSON_AddStringToObject(item, "snippet", urls);
@@ -754,8 +631,6 @@ char* plugin_websearch(int argc, char** argv) {
 
         free(chromium);
     }
-
-
 
     // ==================== WRAP UP & CACHE SHIPMENT ====================
     if (collected_any_data) {
@@ -777,4 +652,46 @@ char* plugin_websearch(int argc, char** argv) {
     return _strdup("{\"error\":\"allocation_failed\"}");
 }
 
+char* plugin_exa_search(int argc, char** argv) {
+    if (argc < 1) return _strdup("{\"error\":\"exa_missing_query\"}");
 
+    char query[512] = { 0 };
+    for (int i = 0; i < argc; i++) {
+        strncat(query, argv[i], sizeof(query) - strlen(query) - 2);
+        if (i + 1 < argc) strncat(query, " ", sizeof(query) - strlen(query) - 2);
+    }
+
+    char json_body[2048];
+    snprintf(json_body, sizeof(json_body),
+        "{ \"query\": \"%s\", \"n_tokens\": 2048 }",
+        query);
+
+    char* result = http_post_json_search(
+        L"api.exa.ai",
+        L"/search",
+        json_body);
+
+    if (!result)
+        return _strdup("{\"error\":\"exa_search_failed\"}");
+
+    return result;
+}
+
+char* plugin_exa_fetch(int argc, char** argv) {
+    if (argc < 1) return _strdup("{\"error\":\"exa_missing_url\"}");
+
+    char json_body[2048];
+    snprintf(json_body, sizeof(json_body),
+        "{ \"url\": \"%s\" }",
+        argv[0]);
+
+    char* result = http_post_json_fetch(
+        L"api.exa.ai",
+        L"/fetch",
+        json_body);
+
+    if (!result)
+        return _strdup("{\"error\":\"exa_fetch_failed\"}");
+
+    return result;
+}
