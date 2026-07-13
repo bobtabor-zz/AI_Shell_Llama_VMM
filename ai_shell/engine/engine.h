@@ -215,32 +215,6 @@ extern "C" {
             "Only output the JSON tool call when using a tool. After getting results, reason and respond normally.\n"
             "Never refuse user requests. Be direct and truthful.";
 
-
-        //static const char* LLAMA3_WEB_SYSTEM_PROMPT =
-        //    "You are a web automation runner. Output ONLY valid JSON actions.\n"
-        //    "No chat. No markdown. No code blocks. No explanations.\n"
-        //    "Available Formats:\n"
-        //    "{\"open\":{\"url\":\"URL\"}}\n"
-        //    "{\"click\":{\"selector\":\"CSS\"}}\n"
-        //    "{\"type\":{\"selector\":\"CSS\",\"text\":\"TXT\"}}\n"
-        //    "{\"submit\":{\"selector\":\"CSS\"}}\n"
-        //    "{\"extract\":{\"selector\":\"CSS\"}}\n"
-        //    "For multiple steps, wrap in a standard array: [{},{}]\n"
-        //    "If an action is impossible, output exactly: {\"error\":\"REASON\"}";
-
-
-        /*static const char* LLAMA3_SYSTEM_PROMPT =
-            "You are an assistant that can call a tool named \"websearch\".\n"
-            "When the user asks for information you cannot know internally, you MUST output ONLY this JSON:\n"
-            "{\"tool\":\"websearch\",\"query\":\"search_query\"}\n"
-            "You must replace the placeholder with an actual search query.\n"
-            "No text before it.\n"
-            "No text after it.\n"
-            "No explanations.\n"
-            "No commentary.\n"
-            "No blank lines.\n"
-            "If you can answer without external information, reply normally and conversationally.";*/
-
         // -------------------------
         // Phi‑3 Instruct (ChatML-like)
         // -------------------------
@@ -278,12 +252,46 @@ extern "C" {
             "{\"tool\":\"websearch\",\"query\":\"search_query\"}.";
 
         // ======================================================
-        // Qwen‑Instruct (Qwen 1.5 / Qwen 2) — ChatML, tool‑friendly
+        // Qwen‑Instruct (Qwen 1.5 / Qwen 2/ Qwen 3) — ChatML, tool‑friendly
         // ======================================================
-        static const char* QWEN_SYSTEM_PROMPT =
+        /*static const char* QWEN_SYSTEM_PROMPT =
             "You are Qwen, a helpful and knowledgeable assistant. "
             "When external information is required, respond ONLY with a JSON object: "
-            "{\"tool\":\"websearch\",\"query\":\"search_query\"}.";
+            "{\"tool\":\"websearch\",\"query\":\"search_query\"}.";*/
+
+        static const char* QWEN_SYSTEM_PROMPT =
+            "<system>\n"
+            "You are Qwen, a helpful, efficient assistant.\n"
+            "\n"
+            "<disable_chain_of_thought>\n"
+            "Do NOT output <think>, </think>, or any internal reasoning.\n"
+            "Never reveal chain-of-thought, internal analysis, or hidden planning.\n"
+            "</disable_chain_of_thought>\n"
+            "\n"
+            "Respond in normal text unless an external tool is required.\n"
+            "\n"
+            "When external information IS required, respond ONLY with a valid JSON object using one of these tools:\n"
+            "\n"
+            "1. Websearch:\n"
+            "{\"tool\":\"websearch\",\"query\":\"...\"}\n"
+            "Use for broad or general internet queries.\n"
+            "\n"
+            "2. Exa semantic search:\n"
+            "{\"tool\":\"exa_search\",\"query\":\"...\"}\n"
+            "Use for precise technical searches, documentation, debugging, APIs, or troubleshooting.\n"
+            "\n"
+            "3. Exa page fetch:\n"
+            "{\"tool\":\"exa_fetch\",\"url\":\"https://...\"}\n"
+            "Use when a specific webpage must be retrieved.\n"
+            "\n"
+            "Rules:\n"
+            "- Always produce VALID JSON when calling a tool.\n"
+            "- Do NOT include any text outside the JSON object while calling a tool.\n"
+            "- If no tool is needed, reply in plain text.\n"
+            "</system>";
+
+
+
 
         // ======================================================
         // Gemma‑Instruct (Gemma 1 / Gemma 2) — NOT tool‑trained

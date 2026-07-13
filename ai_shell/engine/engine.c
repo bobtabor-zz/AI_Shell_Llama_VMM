@@ -127,14 +127,14 @@ static model_family_t detect_model_family(const char* path, struct llama_model* 
             *p = (char)tolower(*p);
         }
 
-  //      if (strcmp(a, "llama3") == 0) return MODEL_LLAMA3;
-		//if (strcmp(a, "llama") == 0) return MODEL_LLAMA3;  /// Llama‑3 is sometimes just "llama" in GGUF
-  //      if (strcmp(a, "phi3") == 0) return MODEL_PHI3;
-  //      if (strcmp(a, "smollm") == 0) return MODEL_SMOLLM;
-  //      if (strcmp(a, "mistral") == 0) return MODEL_MISTRAL;
-  //      if (strcmp(a, "qwen2") == 0 || strcmp(a, "qwen") == 0)
-  //          return MODEL_QWEN;
-  //      if (strcmp(a, "gemma") == 0) return MODEL_GEMMA;
+       // if (strcmp(a, "llama3") == 0) return MODEL_LLAMA3;
+	   //if (strcmp(a, "llama") == 0) return MODEL_LLAMA3;  /// Llama‑3 is sometimes just "llama" in GGUF
+       // if (strcmp(a, "phi3") == 0) return MODEL_PHI3;
+       // if (strcmp(a, "smollm") == 0) return MODEL_SMOLLM;
+       // if (strcmp(a, "mistral") == 0) return MODEL_MISTRAL;
+        if (strcmp(a, "qwen2") == 0 || strcmp(a, "qwen") == 0 || strcmp(a, "qwen3") == 0)
+            return MODEL_QWEN;
+       // if (strcmp(a, "gemma") == 0) return MODEL_GEMMA;
 
         // Optional: add more architectures here
     }
@@ -174,7 +174,7 @@ static model_family_t detect_model_family(const char* path, struct llama_model* 
         if (strstr(lower2, "mistral"))
             return MODEL_MISTRAL;
 
-        if (strstr(lower2, "qwen"))
+        if (strstr(lower2, "qwen_qwen3") || strstr(lower2, "qwen") || strstr(lower2, "qwen3"))
             return MODEL_QWEN;
 
         if (strstr(lower2, "gemma"))
@@ -624,6 +624,20 @@ char* extract_websearch_query(const char* json) {
 
 
 
+char* extract_webfetch_url(const char* json) {
+    const char* p = strstr(json, "\"url\":\"");
+    if (!p) return NULL;
+    p += strlen("\"url\":\"");
+    const char* end = strchr(p, '"');
+    if (!end) return NULL;
+    size_t len = end - p;
+
+    char* out = malloc(len + 1);
+    strncpy(out, p, len);
+    out[len] = 0;
+    return out;
+}
+
 // Note: changed bool to int for standard C compatibility unless using <stdbool.h>
 
 int repair_json(const char* input, char* output, size_t out_size) {
@@ -703,6 +717,8 @@ int engine_generate_reply(
 
     struct llama_batch batch = llama_batch_init(1, 0, 1);
 
+    bool qwen_thinking = false;
+
     bool json_started = false;
     bool json_complete = false;
     json_detector_t jd = { 0 };
@@ -728,87 +744,203 @@ int engine_generate_reply(
                
        // fprintf(stderr, "[tok %02d] %s\n", n_gen, piece); // test output
 
-        if (g_model_family != MODEL_LLAMA3_WEB && g_model_family != MODEL_HERMES2_WEB)
-        {
-            // 3. JSON STATE MACHINE FEED (Only process if there are characters)
-            if (n > 0) {
-                for (int i = 0; i < n; i++) {
-                    char c = piece[i];
-                    if (jd.len < sizeof(jd.buf) - 1) {
-                        jd.buf[jd.len++] = c;
-                        jd.buf[jd.len] = 0;
-                    }
-                    switch (jd.state) {
-                    case 0: if (c == '{') jd.state = 1; break;
-                    case 1: if (strstr(jd.buf, "{\"tool\":\"websearch\",\"query\":\"")) jd.state = 2; break;
-                    case 2: if (c == '}' && jd.len > 2 && jd.buf[jd.len - 2] == '"')
-                    {
-                        json_complete = true;
-                        break;
-                    }
-                    }
-                }
+        // If Qwen, detect <think> start/end
+        if (g_model_family == MODEL_QWEN) {
+
+            // detect "<think>"
+            if (strstr(piece, "<think>")) {
+                qwen_thinking = true;
             }
 
-            // 4. Detect JSON start
-            if (jd.state == 2 && !json_started)
-            {
-                json_started = true;
-                out_len = 0;
-                out[0] = '\0';
+            // detect "</think>"
+            if (strstr(piece, "</think>")) {
+                qwen_thinking = false;
             }
 
-            if (jd.state == 2)
+            if (qwen_thinking) {
+                memcpy(out + out_len, piece, n);
+                goto qwen_next_token;
+            }
+
+            //// If still inside <think>, skip ALL JSON detection
+            //if (qwen_thinking) {
+            //    // Still append output normally
+            //    if (out_len + n < out_size - 1) {
+            //        memcpy(out + out_len, piece, n);
+            //        out_len += n;
+            //        out[out_len] = '\0';
+            //    }
+
+            //    // And skip tool logic
+            //    goto qwen_next_token;
+            //}
+        }
+
+
+        if (!qwen_thinking) {
+            if (g_model_family != MODEL_LLAMA3_WEB && g_model_family != MODEL_HERMES2_WEB)
             {
-                bool fixed = repair_json(jd.buf, repaired, sizeof(repaired));
-                if (fixed) {
-                    json_complete = true;
-                    strncpy(json_block, repaired, sizeof(json_block) - 1);
-                    json_block[sizeof(json_block) - 1] = 0;
+                // 3. JSON STATE MACHINE FEED (Only process if there are characters)
+                if (n > 0) {
+                    for (int i = 0; i < n; i++) {
+                        char c = piece[i];
+                        if (jd.len < sizeof(jd.buf) - 1) {
+                            jd.buf[jd.len++] = c;
+                            jd.buf[jd.len] = 0;
+                        }
+                        switch (jd.state) {
+                        case 0:
+                            if (c == '{')
+                                jd.state = 1;
+                            break;
+
+                        case 1:
+                            // Detect ANY of the supported tools
+                            if (strstr(jd.buf, "{\"tool\":\"websearch\",\"query\":\"") ||
+                                strstr(jd.buf, "{\"tool\":\"exa_search\",\"query\":\"") ||
+                                strstr(jd.buf, "{\"tool\":\"exa_fetch\",\"url\":\""))
+                            {
+                                jd.state = 2;
+                            }
+                            break;
+
+                        case 2:
+                            // Detect closing brace of JSON
+                            if (c == '}' && jd.len > 2 && jd.buf[jd.len - 2] == '"') {
+                                json_complete = true;
+                            }
+                            break;
+                        }
+
+                    }
                 }
-                else
+
+                // 4. Detect JSON start
+                if (jd.state == 2 && !json_started)
                 {
-                    if (json_complete)
-                    {
-                        strncpy(json_block, jd.buf, sizeof(json_block) - 1);
+                    json_started = true;
+                    out_len = 0;
+                    out[0] = '\0';
+                }
+
+                if (jd.state == 2)
+                {
+                    bool fixed = repair_json(jd.buf, repaired, sizeof(repaired));
+                    if (fixed) {
+                        json_complete = true;
+                        strncpy(json_block, repaired, sizeof(json_block) - 1);
                         json_block[sizeof(json_block) - 1] = 0;
                     }
+                    else
+                    {
+                        if (json_complete)
+                        {
+                            strncpy(json_block, jd.buf, sizeof(json_block) - 1);
+                            json_block[sizeof(json_block) - 1] = 0;
+                        }
+                    }
                 }
-            }
 
-            // 5. Capture JSON or normal text
-            if (out_len + n < out_size - 1) {
-                memcpy(out + out_len, piece, n);
-                out_len += n;
-                out[out_len] = '\0';
-            }
+                // 5. Capture JSON or normal text
+                if (out_len + n < out_size - 1) {
+                    memcpy(out + out_len, piece, n);
+                    out_len += n;
+                    out[out_len] = '\0';
+                }
 
-            // =====================================================================
-            // RUN STEP 6 HERE FIRST: Check if JSON is complete BEFORE checking EOT!
-            // =====================================================================
-            if (json_complete) {
-                /* strncpy(json_block, repaired, sizeof(json_block) - 1);
-                 json_block[sizeof(json_block) - 1] = 0;*/
-                char* query = extract_websearch_query(json_block);
-                if (query) {
-                    char* argvv[1] = { query };
-                    char* result = plugin_websearch(1, argvv);
-                    free(query);
+                // =====================================================================
+                // RUN STEP 6 HERE FIRST: Check if JSON is complete BEFORE checking EOT!
+                // =====================================================================
+                if (json_complete) {
 
-                    if (result) {
-                        snprintf(out, out_size, "%s\n\n[WEBSEARCH RESULT]\n%s", json_block, result);
-                        free(result);
+                    // ==========================
+                    // 1. Check for EXA SEARCH
+                    // ==========================
+                    if (strstr(json_block, "\"tool\":\"exa_search\"")) {
+                        char* query = extract_websearch_query(json_block);
+                        if (query) {
+                            char* argvv[1] = { query };
+                            char* result = plugin_exa_search(1, argvv);
+                            free(query);
+
+                            if (result) {
+                                snprintf(out, out_size, "%s\n\n[EXA SEARCH RESULT]\n%s",
+                                    json_block, result);
+                                free(result);
+                            }
+
+                            // Cleanup
+                            jd.state = 0;
+                            jd.len = 0;
+                            jd.buf[0] = 0;
+                            json_started = false;
+                            json_complete = false;
+                            memset(json_block, 0, sizeof(json_block));
+
+                            llama_batch_free(batch);
+                            return (int)strlen(out);
+                        }
                     }
 
-                    // Clean up structures completely
-                    jd.state = 0;
-                    jd.len = 0;
-                    jd.buf[0] = 0;
-                    json_started = false;
-                    json_complete = false;
-                    memset(json_block, 0, sizeof(json_block));
-                    llama_batch_free(batch);
-                    return (int)strlen(out); // Exits cleanly with the search results!
+
+                    // ==========================
+                    // 2. Check for EXA FETCH
+                    // ==========================
+                    if (strstr(json_block, "\"tool\":\"exa_fetch\"")) {
+                        char* url = extract_webfetch_url(json_block);
+                        if (url) {
+                            char* argvv[1] = { url };
+                            char* result = plugin_exa_fetch(1, argvv);
+                            free(url);
+
+                            if (result) {
+                                snprintf(out, out_size, "%s\n\n[EXA FETCH RESULT]\n%s",
+                                    json_block, result);
+                                free(result);
+                            }
+
+                            // Cleanup
+                            jd.state = 0;
+                            jd.len = 0;
+                            jd.buf[0] = 0;
+                            json_started = false;
+                            json_complete = false;
+                            memset(json_block, 0, sizeof(json_block));
+
+                            llama_batch_free(batch);
+                            return (int)strlen(out);
+                        }
+                    }
+
+
+                    // ==========================
+                    // 3. Default WEBSEARCH handler
+                    // ==========================
+                    if (strstr(json_block, "\"tool\":\"websearch\"")) {
+                        char* query = extract_websearch_query(json_block);
+                        if (query) {
+                            char* argvv[1] = { query };
+                            char* result = plugin_websearch(1, argvv);
+                            free(query);
+
+                            if (result) {
+                                snprintf(out, out_size, "%s\n\n[WEBSEARCH RESULT]\n%s",
+                                    json_block, result);
+                                free(result);
+                            }
+
+                            // Cleanup
+                            jd.state = 0;
+                            jd.len = 0;
+                            jd.buf[0] = 0;
+                            json_started = false;
+                            json_complete = false;
+                            memset(json_block, 0, sizeof(json_block));
+
+                            llama_batch_free(batch);
+                            return (int)strlen(out);
+                        }
+                    }
                 }
             }
         }
@@ -875,12 +1007,22 @@ int engine_generate_reply(
             }
         }
 
+        qwen_next_token:
+
+
         // =====================================================================
         // NOW IT IS SAFE TO BREAK: If no tool was called, handle control tokens
         // =====================================================================
         if (tok == eos_tok) break;
         if (tok == eot_tok && eot_tok != -1) break;
-        if (llama_token_is_control(vocab, tok)) break;
+
+        // if (llama_token_is_control(vocab, tok)) break;
+        // Qwen Thinking models use control tokens for <think>
+        // Do NOT break for MODEL_QWEN
+        if (g_model_family != MODEL_QWEN || !qwen_thinking) {
+            if (llama_token_is_control(vocab, tok)) break;
+        }
+
 
         // 8. Prepare batch for next decode (unchanged)        
         batch.n_tokens = 1;
@@ -1055,7 +1197,7 @@ int engine_chat_html(
     }
     model_reply[0] = '\0';
 
-    int rc = engine_generate_reply(e, model_reply, out_size, 512);
+    int rc = engine_generate_reply(e, model_reply, out_size, 1024);
     if (rc < 0) {
         free(model_reply);
         if (plugin_executed && Plugin_result) free(Plugin_result);
@@ -1172,16 +1314,33 @@ engine_t* engine_open(const char* model_path) {
     // Read the native maximum training context limit embedded directly inside the GGUF file
     int32_t model_train_ctx = llama_model_n_ctx_train(e->model);
 
-    if (model_train_ctx > 0) {
-        // Successfully pulled from GGUF metadata. Assign it directly!
+    //if (model_train_ctx > 0) {
+    //    // Successfully pulled from GGUF metadata. Assign it directly!
+    //    cparams.n_ctx = model_train_ctx;
+    //    printf("[SUCCESS] GGUF metadata found! Context length auto-populated to: %d tokens.\n", cparams.n_ctx);
+    //}
+    //else {
+    //    // Fallback guard condition in case the metadata key is missing
+    //    cparams.n_ctx = 4096;
+    //    printf("[WARN] GGUF metadata context length unavailable. Falling back to default: 4096 tokens.\n");
+    //}
+
+
+
+    // Thinking models declare massive max context (over 250k)
+    // but llama.cpp cannot allocate KV that large in CPU RAM unless you have >48GB free
+    if (model_train_ctx > 8192) {
+        cparams.n_ctx = 8192;        // SAFE VALUE
+    }
+    else if (model_train_ctx > 0) {
         cparams.n_ctx = model_train_ctx;
-        printf("[SUCCESS] GGUF metadata found! Context length auto-populated to: %d tokens.\n", cparams.n_ctx);
     }
     else {
-        // Fallback guard condition in case the metadata key is missing
-        cparams.n_ctx = 4096;
-        printf("[WARN] GGUF metadata context length unavailable. Falling back to default: 4096 tokens.\n");
+        cparams.n_ctx = 4096;        // fallback
     }
+
+    printf("[engine] Using capped context length: %d tokens.\n", cparams.n_ctx);
+
 
     // Keep sequence scaling optimized for your singular tracking stream
     cparams.n_seq_max = 1;
