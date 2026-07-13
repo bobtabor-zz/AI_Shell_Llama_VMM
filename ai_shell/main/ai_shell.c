@@ -284,7 +284,8 @@ int main(void) {
     plugin_register("ddg", plugin_ddg);
     plugin_register("summarize_term", plugin_summarize_file);  // need to check
     plugin_register("websearch", plugin_websearch);
-   // plugin_register("ddg_term", plugin_ddg_Term);   
+    plugin_register("exa_search", plugin_exa_search); 
+    plugin_register("exa_fetch", plugin_exa_fetch);
     plugin_register("summarize_file", plugin_summarize_file_html);
 
     // ⭐ START HTTP SERVER IN BACKGROUND THREAD ⭐
