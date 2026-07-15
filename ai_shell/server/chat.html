@@ -279,7 +279,15 @@
             div.className = `msg ${role}`;
 
             // FIX 1: Clean raw JSON escape strings (like \" and \\) BEFORE running regex looks
-            let html = text.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+            //let html = text.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+
+            let html = text
+                .replace(/\\"/g, '"')
+                .replace(/\\\\/g, '\\');
+
+            // NEW FIX: turn literal escaped \n into actual newlines
+            html = html.replace(/\\n/g, "\n");
+
 
             // 1. Process images safely first (ignoring existing tags)
             const imgRegex = /(?<!=["'])(https?:\/\/[^\s<>"]+\.(?:jpg|jpeg|png|gif|webp))/gi;
@@ -312,9 +320,6 @@
                 chat.scrollTop = chat.scrollHeight;
             }
         }
-
-
-
 
 
         function storeMessage(text, role) {
