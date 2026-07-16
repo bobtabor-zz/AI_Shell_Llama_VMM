@@ -682,12 +682,12 @@ char* plugin_exa_fetch(int argc, char** argv) {
 
     char json_body[2048];
     snprintf(json_body, sizeof(json_body),
-        "{ \"url\": \"%s\" }",
+        "{\"urls\": [\"%s\"], \"text\": true}",  //"{ \"url\": \"%s\" }",
         argv[0]);
 
     char* result = http_post_json_fetch(
         L"api.exa.ai",
-        L"/fetch",
+        L"/contents",    // L"/fetch",
         json_body);
 
     if (!result)

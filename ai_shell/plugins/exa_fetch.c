@@ -22,6 +22,7 @@ char* http_post_json_fetch(const wchar_t* host, const wchar_t* path, const char*
     if (!c) { WinHttpCloseHandle(s); return NULL; }
 
     HINTERNET r = WinHttpOpenRequest(
+        /*c, L"GET", L"/", NULL, WINHTTP_NO_REFERER,*/
         c, L"POST", path, NULL, WINHTTP_NO_REFERER,
         WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
     if (!r) {
@@ -59,7 +60,7 @@ char* http_post_json_fetch(const wchar_t* host, const wchar_t* path, const char*
     WinHttpReceiveResponse(r, NULL);
 
     DWORD size = 0, downloaded = 0;
-    char* buf = malloc(1);
+    char* buf = malloc(4096);
     size_t total = 0;
 
     do {
