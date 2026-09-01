@@ -505,7 +505,22 @@ char* plugin_websearch(int argc, char** argv) {
     if (ddg) {
         cJSON* ddg_json = cJSON_Parse(ddg);
         if (ddg_json) {
-            collected_any_data = true;
+            //collected_any_data = true;
+
+             // === Handle DDG AnswerType (weather, dictionary, calculation, etc.) ===
+            cJSON* answerType = cJSON_GetObjectItem(ddg_json, "AnswerType");
+            if (answerType && cJSON_IsString(answerType)) {
+                cJSON* item = cJSON_CreateObject();
+                cJSON_AddStringToObject(item, "source", "DDG");
+                char combined_AT[512] = { 0 };
+                snprintf(combined_AT, sizeof(combined_AT),
+                    "DuckDuckGo AnswerType: %s", answerType->valuestring);
+                cJSON_AddStringToObject(item, "title", combined_AT);
+                cJSON_AddStringToObject(item, "snippet", ddg);
+                cJSON_AddItemToArray(master_results, item);
+                collected_any_data = true;
+            }
+
 
             if (cJSON_IsArray(ddg_json)) {
                 cJSON* element = NULL;
@@ -579,6 +594,19 @@ char* plugin_websearch(int argc, char** argv) {
         //char ddg_text[2048];   // writable buffer
         //snprintf(ddg_text, sizeof(ddg_text), "%s", ddg);
         
+        // === DDG FALLBACK: ALWAYS ADD RAW RESULT IF NOTHING PARSED ===
+        if (ddg && strlen(ddg) > 0) {
+            // Only add fallback if the parsed DDG JSON gave you nothing
+            if (!collected_any_data) {
+                cJSON* raw_ddg = cJSON_CreateObject();
+                cJSON_AddStringToObject(raw_ddg, "source", "DDG");
+                cJSON_AddStringToObject(raw_ddg, "title", "Raw DuckDuckGo response");
+                cJSON_AddStringToObject(raw_ddg, "snippet", ddg);
+                cJSON_AddItemToArray(master_results, raw_ddg);
+                collected_any_data = true;
+            }
+        }
+
         free(ddg);
     }
 
@@ -627,6 +655,19 @@ char* plugin_websearch(int argc, char** argv) {
 
 
             cJSON_Delete(chromium_json);
+        }
+
+        // === Chromium Fallback: Always add raw HTML if structured parse fails ===
+        if (chromium && strlen(chromium) > 0) {
+            // Only add fallback if HTML didn't match chromium_html format
+            if (!collected_any_data) {
+                cJSON* raw_chrome = cJSON_CreateObject();
+                cJSON_AddStringToObject(raw_chrome, "source", "Chromium");
+                cJSON_AddStringToObject(raw_chrome, "title", "Raw Chromium HTML");
+                cJSON_AddStringToObject(raw_chrome, "snippet", chromium);
+                cJSON_AddItemToArray(master_results, raw_chrome);
+                collected_any_data = true;
+            }
         }
 
         free(chromium);
